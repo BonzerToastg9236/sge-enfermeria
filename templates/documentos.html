@@ -96,28 +96,7 @@
     <div class="hero-doc">
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
-            <div class="d-flex align-items-center gap-2">
-                <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
-                    <i class="bi bi-search me-1"></i> Buscador
-                </a>
-                <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="btn btn-light btn-sm fw-semibold">
-                    <i class="bi bi-folder2-open me-1"></i> Expediente
-                </a>
-                <div class="dropdown">
-                    <button class="btn btn-outline-light btn-sm dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown">
-                        <i class="bi bi-person-circle me-1"></i> {{ current_user.nombre_completo }}
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        <li><h6 class="dropdown-header">{{ current_user.rol.value }}</h6></li>
-                        <li><a class="dropdown-item" href="{{ url_for('perfil') }}"><i class="bi bi-person-gear me-2"></i>Mi Perfil</a></li>
-                        {% if current_user.es_directivo() %}
-                            <li><a class="dropdown-item" href="{{ url_for('usuarios') }}"><i class="bi bi-people me-2"></i>Administrativos</a></li>
-                        {% endif %}
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Cerrar Sesión</a></li>
-                    </ul>
-                </div>
-            </div>
+            {% include '_nav.html' %}
         </div>
         <h1 class="fw-bold"><i class="bi bi-cloud-arrow-up me-2"></i>Documentos del Expediente</h1>
         <p class="fs-5 mb-0 opacity-75">{{ alumno.nombre_completo }} &middot; {{ alumno.matricula_id }}</p>

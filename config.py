@@ -54,6 +54,14 @@ class ProductionConfig(Config):
     DEBUG = False
     SESSION_COOKIE_SECURE = True  # El VPS debe servir por HTTPS (Nginx + certificado)
 
+    # Gunicorn corre VARIOS workers (procesos separados) en producción.
+    # "memory://" es por-proceso, así que cada worker tendría su propio
+    # contador de intentos de login — el límite de 5/min dejaría de ser real
+    # (alguien podría intentar 5 × número_de_workers antes de que aplique).
+    # Redis es un storage COMPARTIDO entre todos los workers, por eso se
+    # exige aquí. Instálalo en el VPS con: sudo apt install redis-server
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI', 'redis://localhost:6379')
+
 
 config_by_name = {
     'development': DevelopmentConfig,

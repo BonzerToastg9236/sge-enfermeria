@@ -1,0 +1,71 @@
+{# ============================================================
+   MENÚ LATERAL COMPARTIDO (Offcanvas)
+   Se incluye con {% include '_nav.html' %} en cada página interna.
+   Si la página define la variable `alumno` (documentos, expediente,
+   boleta, ficha_inscripcion), se agrega automáticamente la sección
+   "Alumno Actual" con accesos directos a sus 4 vistas.
+   ============================================================ #}
+
+<button class="btn btn-outline-light btn-sm fw-semibold" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuLateral">
+    <i class="bi bi-list me-1"></i> Menú
+</button>
+
+<div class="offcanvas offcanvas-start" tabindex="-1" id="menuLateral">
+    <div class="offcanvas-header border-bottom">
+        <div>
+            <h5 class="offcanvas-title fw-bold mb-0"><i class="bi bi-mortarboard-fill me-1"></i> SGE</h5>
+            <small class="text-muted">{{ current_user.nombre_completo }} &middot; {{ current_user.rol.value }}</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column p-0">
+
+        <div class="list-group list-group-flush">
+            <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action py-3">
+                <i class="bi bi-search me-2 text-primary"></i> Buscador
+            </a>
+            <a href="{{ url_for('registro') }}" class="list-group-item list-group-item-action py-3" target="_blank">
+                <i class="bi bi-person-plus-fill me-2 text-primary"></i> Registrar Nuevo Alumno
+                <i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i>
+            </a>
+        </div>
+
+        {% if alumno %}
+            <div class="px-3 pt-3 pb-1">
+                <small class="text-uppercase fw-bold text-muted" style="letter-spacing:0.5px;">
+                    Alumno Actual
+                </small>
+                <div class="fw-semibold small text-truncate">{{ alumno.nombre_completo }}</div>
+                <div class="text-muted small">{{ alumno.matricula_id }}</div>
+            </div>
+            <div class="list-group list-group-flush">
+                <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-folder2-open me-2 text-primary"></i> Expediente
+                </a>
+                <a href="{{ url_for('documentos', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-cloud-arrow-up me-2 text-primary"></i> Documentos
+                </a>
+                <a href="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-journal-text me-2 text-primary"></i> Capturar Boleta
+                </a>
+                <a href="{{ url_for('ficha_inscripcion', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-file-earmark-person me-2 text-primary"></i> Ficha de Inscripción
+                </a>
+            </div>
+        {% endif %}
+
+        <div class="mt-auto list-group list-group-flush border-top">
+            <a href="{{ url_for('perfil') }}" class="list-group-item list-group-item-action py-3">
+                <i class="bi bi-person-gear me-2 text-secondary"></i> Mi Perfil
+            </a>
+            {% if current_user.es_directivo() %}
+                <a href="{{ url_for('usuarios') }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-people me-2 text-secondary"></i> Administrativos
+                </a>
+            {% endif %}
+            <a href="{{ url_for('logout') }}" class="list-group-item list-group-item-action py-3 text-danger">
+                <i class="bi bi-box-arrow-right me-2"></i> Cerrar Sesión
+            </a>
+        </div>
+    </div>
+</div>

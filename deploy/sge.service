@@ -1,0 +1,41 @@
+# /etc/systemd/system/sge.service
+#
+# Este archivo va en el servidor, NO en tu proyecto. Instrucciones de
+# instalación completas en deploy/DEPLOYMENT.md.
+#
+# Qué hace: mantiene Gunicorn corriendo como un servicio real de Linux:
+# arranca solo cuando el VPS reinicia, y si el proceso muere por cualquier
+# razón, systemd lo vuelve a levantar automáticamente.
+
+[Unit]
+Description=Gunicorn - Sistema de Gestion Escolar (SGE)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+# Usuario dedicado para correr la app (NUNCA root). Ver DEPLOYMENT.md
+# para crear este usuario.
+User=sge
+Group=www-data
+
+# Ruta donde clonaste el proyecto en el VPS
+WorkingDirectory=/home/sge/sge_enfermeria
+
+# Variables de entorno para producción
+Environment="FLASK_ENV=production"
+EnvironmentFile=/home/sge/sge_enfermeria/.env
+
+# Ruta al gunicorn DENTRO de tu entorno virtual (venv) del VPS
+ExecStart=/home/sge/sge_enfermeria/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/home/sge/sge_enfermeria/sge.sock \
+    --access-logfile /home/sge/sge_enfermeria/logs/access.log \
+    --error-logfile /home/sge/sge_enfermeria/logs/error.log \
+    --timeout 60 \
+    app:app
+
+# Si el proceso se cae, reinícialo solo después de 5 segundos
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

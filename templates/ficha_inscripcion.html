@@ -120,12 +120,10 @@
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
             <div class="d-flex gap-2">
-                <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="btn btn-light btn-sm fw-semibold">
-                    <i class="bi bi-folder2-open me-1"></i> Expediente
-                </a>
                 <button class="btn btn-warning btn-sm fw-semibold" onclick="window.print()">
                     <i class="bi bi-printer me-1"></i> Imprimir Ficha
                 </button>
+                {% include '_nav.html' %}
             </div>
         </div>
         <h1 class="fw-bold"><i class="bi bi-file-earmark-person me-2"></i>Ficha de Inscripción</h1>

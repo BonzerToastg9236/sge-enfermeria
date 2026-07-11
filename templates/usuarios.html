@@ -23,9 +23,7 @@
     <div class="hero-usr">
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
-            <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
-                <i class="bi bi-search me-1"></i> Buscador
-            </a>
+            {% include '_nav.html' %}
         </div>
         <h1 class="fw-bold"><i class="bi bi-people-fill me-2"></i>Administrativos</h1>
         <p class="mb-0 opacity-75">Gestión de cuentas de acceso al sistema</p>

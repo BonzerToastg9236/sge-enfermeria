@@ -25,9 +25,12 @@
     <div class="hero-nu">
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
-            <a href="{{ url_for('usuarios') }}" class="btn btn-light btn-sm fw-semibold">
-                <i class="bi bi-arrow-left me-1"></i> Volver al listado
-            </a>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('usuarios') }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-arrow-left me-1"></i> Volver al listado
+                </a>
+                {% include '_nav.html' %}
+            </div>
         </div>
         <h1 class="fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Nuevo Usuario</h1>
         <p class="mb-0 opacity-75">Crear cuenta de acceso al sistema</p>

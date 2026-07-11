@@ -674,11 +674,52 @@ def toggle_usuario(user_id):
 # Pantalla principal de uso exclusivo de Control Escolar.
 # ---------------------------------------------------------------------------
 
+def calcular_estadisticas_alumnos():
+    """Números clave para el panel del buscador (pantalla de inicio)."""
+    return {
+        'total': Alumno.query.count(),
+        'pendientes': Alumno.query.filter_by(estatus=EstatusAlumno.PENDIENTE).count(),
+        'activos': Alumno.query.filter_by(estatus=EstatusAlumno.ACTIVO).count(),
+        'documentacion_incompleta': Alumno.query.filter(Alumno.documentacion_pendiente.isnot(None)).count(),
+        'faltas': Alumno.query.filter(Alumno.faltas_administrativas.isnot(None)).count(),
+    }
+
+
 @app.route('/')
 @login_required
 def index():
-    """Pantalla de inicio: el buscador universal, sin resultados aún."""
-    return render_template('buscador.html')
+    """
+    Pantalla de inicio: dashboard con números clave + filtros rápidos,
+    y el buscador universal. Si viene ?filtro=algo en la URL, muestra
+    esa lista filtrada en vez del dashboard vacío.
+    """
+    estadisticas = calcular_estadisticas_alumnos()
+
+    filtros_disponibles = {
+        'pendientes': ('Alumnos Pendientes de Validación', Alumno.estatus == EstatusAlumno.PENDIENTE),
+        'activos': ('Alumnos Activos', Alumno.estatus == EstatusAlumno.ACTIVO),
+        'documentacion': ('Alumnos con Documentación Pendiente', Alumno.documentacion_pendiente.isnot(None)),
+        'faltas': ('Alumnos con Faltas Administrativas', Alumno.faltas_administrativas.isnot(None)),
+        'recientes': ('Últimos 10 Alumnos Registrados', None),
+    }
+
+    filtro = request.args.get('filtro')
+    resultados = None
+    titulo_filtro = None
+
+    if filtro in filtros_disponibles:
+        titulo_filtro, condicion = filtros_disponibles[filtro]
+        if filtro == 'recientes':
+            resultados = Alumno.query.order_by(Alumno.fecha_registro.desc()).limit(10).all()
+        else:
+            resultados = Alumno.query.filter(condicion).order_by(Alumno.nombre_completo.asc()).all()
+
+    return render_template(
+        'buscador.html',
+        estadisticas=estadisticas,
+        resultados=resultados,
+        titulo_filtro=titulo_filtro
+    )
 
 
 @app.route('/buscar', methods=['POST'])

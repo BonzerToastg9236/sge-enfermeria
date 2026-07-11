@@ -32,9 +32,7 @@
     <div class="hero-perfil">
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
-            <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
-                <i class="bi bi-search me-1"></i> Buscador
-            </a>
+            {% include '_nav.html' %}
         </div>
         <div class="avatar-circle-lg">{{ current_user.nombre_completo[:1]|upper }}</div>
         <h1 class="fw-bold mb-0">Mi Perfil</h1>
