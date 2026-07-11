@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Documentos del Expediente - {{ alumno.matricula_id }}</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+
+        .hero-doc {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff;
+            padding: 3rem 1rem 4rem 1rem;
+            border-bottom-left-radius: 40px;
+            border-bottom-right-radius: 40px;
+            text-align: center;
+        }
+
+        .form-card {
+            margin-top: -3rem;
+            border: none;
+            border-radius: 18px;
+        }
+
+        .section-title {
+            font-weight: 700;
+            color: #0d6efd;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .section-block {
+            padding: 1.5rem;
+            background-color: #f8f9fb;
+            border-radius: 14px;
+            margin-bottom: 1.75rem;
+            border: 1px solid #eef0f4;
+        }
+
+        .form-label { font-weight: 600; font-size: 0.9rem; color: #33383f; }
+
+        .dato-solo-lectura {
+            background-color: #eef2f7;
+            border-radius: 10px;
+            padding: 0.65rem 0.9rem;
+            font-weight: 600;
+            color: #33383f;
+        }
+
+        .form-control, .form-select {
+            border-radius: 10px;
+            padding: 0.65rem 0.9rem;
+            border: 1px solid #d7dce2;
+        }
+
+        .file-drop {
+            border: 2px dashed #c7d0dc;
+            border-radius: 12px;
+            padding: 1rem;
+            background-color: #fff;
+        }
+
+        .file-drop label { font-weight: 600; }
+
+        .documento-existente {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0.9rem;
+            border-radius: 10px;
+            background-color: #eaf3ff;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .btn-guardar {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            border: none;
+            font-weight: 600;
+            padding: 0.85rem 1.5rem;
+            border-radius: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero-doc">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            <div class="d-flex align-items-center gap-2">
+                <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-search me-1"></i> Buscador
+                </a>
+                <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-folder2-open me-1"></i> Expediente
+                </a>
+                <div class="dropdown">
+                    <button class="btn btn-outline-light btn-sm dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-person-circle me-1"></i> {{ current_user.nombre_completo }}
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">{{ current_user.rol.value }}</h6></li>
+                        <li><a class="dropdown-item" href="{{ url_for('perfil') }}"><i class="bi bi-person-gear me-2"></i>Mi Perfil</a></li>
+                        {% if current_user.es_directivo() %}
+                            <li><a class="dropdown-item" href="{{ url_for('usuarios') }}"><i class="bi bi-people me-2"></i>Administrativos</a></li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Cerrar Sesión</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-cloud-arrow-up me-2"></i>Documentos del Expediente</h1>
+        <p class="fs-5 mb-0 opacity-75">{{ alumno.nombre_completo }} &middot; {{ alumno.matricula_id }}</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-9">
+
+                <!-- FLASH -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi bi-info-circle me-1"></i>{{ message|safe }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card form-card shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        {% if alumno.documentacion_pendiente or alumno.materias_adeudadas or alumno.faltas_administrativas %}
+                            <div class="d-flex flex-wrap gap-2 mb-4">
+                                {% if alumno.documentacion_pendiente %}
+                                    <span class="badge bg-warning text-dark px-3 py-2">
+                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>Documentación pendiente
+                                    </span>
+                                {% endif %}
+                                {% if alumno.materias_adeudadas %}
+                                    <span class="badge bg-danger px-3 py-2">
+                                        <i class="bi bi-journal-x me-1"></i>Debe materias
+                                    </span>
+                                {% endif %}
+                                {% if alumno.faltas_administrativas %}
+                                    <span class="badge bg-secondary px-3 py-2">
+                                        <i class="bi bi-flag-fill me-1"></i>Faltas administrativas
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+
+                        <!-- DATOS DE SOLO LECTURA (ya capturados en el registro) -->
+                        <div class="section-block">
+                            <div class="section-title"><i class="bi bi-person-badge"></i> Datos ya registrados</div>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Nombre Completo</label>
+                                    <div class="dato-solo-lectura">{{ alumno.nombre_completo }}</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">CURP</label>
+                                    <div class="dato-solo-lectura">{{ alumno.curp }}</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Edad</label>
+                                    <div class="dato-solo-lectura">{{ alumno.edad() }} años</div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Fecha de Término (Certificado Prepa)</label>
+                                    <div class="dato-solo-lectura">
+                                        {{ alumno.fecha_certificado_prepa.strftime('%d/%m/%Y') }}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Carrera / Plan</label>
+                                    <div class="dato-solo-lectura">{{ alumno.plan.nombre if alumno.plan else '—' }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <form action="{{ url_for('documentos', matricula=alumno.matricula_id) }}" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                            <!-- DATOS COMPLEMENTARIOS -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-clipboard2-pulse"></i> Datos Complementarios</div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="escuela_prepa" class="form-label">Escuela Preparatoria</label>
+                                        <input type="text" class="form-control" id="escuela_prepa" name="escuela_prepa"
+                                               placeholder="Nombre de la preparatoria de procedencia"
+                                               value="{{ alumno.escuela_prepa or '' }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="telefono" class="form-label">Teléfono (Alumno)</label>
+                                        <input type="tel" class="form-control" id="telefono" name="telefono"
+                                               placeholder="Ej. 55 1234 5678"
+                                               value="{{ alumno.telefono or '' }}">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="telefono_tutor" class="form-label">Teléfono (Tutor Legal)</label>
+                                        <input type="tel" class="form-control" id="telefono_tutor" name="telefono_tutor"
+                                               placeholder="Ej. 55 8765 4321"
+                                               value="{{ alumno.telefono_tutor or '' }}">
+                                    </div>
+                                    <div class="col-12">
+                                        <label for="alergias_condiciones" class="form-label">Alergias o Problemas de Salud</label>
+                                        <textarea class="form-control" id="alergias_condiciones" name="alergias_condiciones"
+                                                  rows="2" placeholder="Ej. Alergia a la penicilina, asma, ninguna, etc.">{{ alumno.alergias_condiciones or '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ARCHIVOS DIGITALIZADOS -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-file-earmark-arrow-up"></i> Archivos Digitalizados</div>
+                                <p class="text-muted small">Formatos permitidos: PDF, JPG, PNG. Puedes subir uno, varios, o dejar en blanco los que no tengas por ahora.</p>
+
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_domicilio" class="form-label d-block">
+                                                <i class="bi bi-house-door me-1"></i> Comprobante de Domicilio
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_domicilio"
+                                                   name="archivo_domicilio" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_ine" class="form-label d-block">
+                                                <i class="bi bi-person-vcard me-1"></i> INE / Identificación Oficial
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_ine"
+                                                   name="archivo_ine" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_curp" class="form-label d-block">
+                                                <i class="bi bi-file-earmark-text me-1"></i> CURP (documento)
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_curp"
+                                                   name="archivo_curp" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_acta" class="form-label d-block">
+                                                <i class="bi bi-file-earmark-medical me-1"></i> Acta de Nacimiento
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_acta"
+                                                   name="archivo_acta" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_certificado" class="form-label d-block">
+                                                <i class="bi bi-mortarboard me-1"></i> Certificado de Preparatoria
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_certificado"
+                                                   name="archivo_certificado" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="file-drop">
+                                            <label for="archivo_foto" class="form-label d-block">
+                                                <i class="bi bi-camera me-1"></i> Fotografía
+                                            </label>
+                                            <input type="file" class="form-control form-control-sm" id="archivo_foto"
+                                                   name="archivo_foto" accept=".pdf,.jpg,.jpeg,.png">
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- SEGUIMIENTO ADMINISTRATIVO Y ACADÉMICO -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-clipboard2-check"></i> Seguimiento Administrativo y Académico</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label for="cuatrimestre_actual" class="form-label">¿En qué cuatrimestre va / inició?</label>
+                                        <select class="form-select" id="cuatrimestre_actual" name="cuatrimestre_actual">
+                                            {% for c in range(1, max_cuatrimestres + 1) %}
+                                                <option value="{{ c }}" {% if alumno.cuatrimestre_actual == c %}selected{% endif %}>
+                                                    {{ c }}° Cuatrimestre
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="text-muted">Por defecto es 1° (nuevo ingreso). Ajusta si entró por revalidación/equivalencia.</small>
+                                    </div>
+
+                                    <div class="col-md-8">
+                                        <label for="documentacion_pendiente" class="form-label">Documentación Pendiente</label>
+                                        <textarea class="form-control" id="documentacion_pendiente" name="documentacion_pendiente"
+                                                  rows="2" placeholder="Ej. Falta acta de nacimiento y certificado médico">{{ alumno.documentacion_pendiente or '' }}</textarea>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="materias_adeudadas" class="form-label">Materias que Adeuda</label>
+                                        <textarea class="form-control" id="materias_adeudadas" name="materias_adeudadas"
+                                                  rows="2" placeholder="Ej. Farmacología I (2° cuatri), pendiente de recursar">{{ alumno.materias_adeudadas or '' }}</textarea>
+                                        <small class="text-muted">Nota manual por ahora; el cálculo automático llegará con el módulo de Historial Académico.</small>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="faltas_administrativas" class="form-label">Faltas Administrativas</label>
+                                        <textarea class="form-control" id="faltas_administrativas" name="faltas_administrativas"
+                                                  rows="2" placeholder="Ej. 2 faltas por inasistencia a junta de padres">{{ alumno.faltas_administrativas or '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-guardar">
+                                    <i class="bi bi-cloud-arrow-up-fill me-2"></i> Guardar Información y Documentos
+                                </button>
+                            </div>
+
+                        </form>
+                        <!-- ^ El <form> principal se cierra AQUÍ, antes de la lista de documentos.
+                             Es a propósito: cada documento subido tiene su propio <form> pequeño
+                             para el botón "Eliminar", y HTML no permite formularios anidados
+                             (un <form> dentro de otro se rompe y el navegador ignora/trunca todo
+                             lo que viene después, incluyendo el botón "Guardar" de arriba). -->
+
+                        <!-- DOCUMENTOS YA SUBIDOS (fuera del form principal a propósito) -->
+                        {% if documentos %}
+                            <div class="section-block mt-2">
+                                <div class="section-title"><i class="bi bi-folder-check"></i> Documentos ya subidos</div>
+                                {% for doc in documentos %}
+                                    {% set url_doc = url_for('static', filename='uploads/documentos/' + doc.ruta_archivo) %}
+                                    {% set es_pdf = doc.nombre_archivo_original.lower().endswith('.pdf') %}
+                                    <div class="documento-existente">
+                                        <span>
+                                            <i class="bi bi-file-earmark-check text-success me-1"></i>
+                                            <strong>{{ doc.tipo_documento.value }}</strong>
+                                            &mdash; {{ doc.nombre_archivo_original }}
+                                            <span class="text-muted">({{ doc.fecha_subida.strftime('%d/%m/%Y %H:%M') }})</span>
+                                        </span>
+                                        <div class="d-flex gap-2">
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-outline-primary btn-ver-documento"
+                                                data-url="{{ url_doc }}"
+                                                data-tipo="{{ 'pdf' if es_pdf else 'imagen' }}"
+                                                data-titulo="{{ doc.tipo_documento.value }}"
+                                            >
+                                                <i class="bi bi-eye me-1"></i> Ver
+                                            </button>
+                                            {% if current_user.es_directivo() %}
+                                            <form
+                                                action="{{ url_for('eliminar_documento', doc_id=doc.id) }}"
+                                                method="POST"
+                                                onsubmit="return confirm('¿Seguro que quieres eliminar este documento ({{ doc.tipo_documento.value }})? Esta acción no se puede deshacer.');"
+                                            >
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                    <i class="bi bi-trash3 me-1"></i> Eliminar
+                                                </button>
+                                            </form>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: VISTA PREVIA DE DOCUMENTO -->
+    <div class="modal fade" id="modalDocumento" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-file-earmark-image me-2"></i>
+                        <span id="modalDocumentoTitulo">Documento</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center" id="modalDocumentoBody">
+                    <!-- El contenido (img o iframe) se inyecta con JS -->
+                </div>
+                <div class="modal-footer">
+                    <a id="modalDocumentoAbrirNueva" href="#" target="_blank" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-box-arrow-up-right me-1"></i> Abrir en pestaña nueva
+                    </a>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            'use strict';
+
+            const modalEl = document.getElementById('modalDocumento');
+            const modal = new bootstrap.Modal(modalEl);
+            const modalBody = document.getElementById('modalDocumentoBody');
+            const modalTitulo = document.getElementById('modalDocumentoTitulo');
+            const modalAbrirNueva = document.getElementById('modalDocumentoAbrirNueva');
+
+            document.querySelectorAll('.btn-ver-documento').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const url = btn.dataset.url;
+                    const tipo = btn.dataset.tipo;
+                    const titulo = btn.dataset.titulo;
+
+                    modalTitulo.textContent = titulo;
+                    modalAbrirNueva.href = url;
+
+                    if (tipo === 'pdf') {
+                        modalBody.innerHTML =
+                            '<iframe src="' + url + '" style="width:100%; height:70vh; border:0;"></iframe>';
+                    } else {
+                        modalBody.innerHTML =
+                            '<img src="' + url + '" class="img-fluid rounded" alt="' + titulo + '">';
+                    }
+
+                    modal.show();
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

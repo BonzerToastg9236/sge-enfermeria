@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Administrativos</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-usr {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-usr { margin-top: -3rem; border: none; border-radius: 18px; }
+    </style>
+</head>
+<body>
+
+    <div class="hero-usr">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
+                <i class="bi bi-search me-1"></i> Buscador
+            </a>
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-people-fill me-2"></i>Administrativos</h1>
+        <p class="mb-0 opacity-75">Gestión de cuentas de acceso al sistema</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-9">
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card card-usr shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <h5 class="fw-bold mb-0">Cuentas registradas</h5>
+                            <a href="{{ url_for('nuevo_usuario') }}" class="btn btn-primary btn-sm fw-semibold">
+                                <i class="bi bi-person-plus-fill me-1"></i> Agregar Administrativo
+                            </a>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-striped align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Usuario</th>
+                                        <th>Rol</th>
+                                        <th>Estatus</th>
+                                        <th>Último acceso</th>
+                                        <th class="text-end">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for u in usuarios %}
+                                        <tr>
+                                            <td>{{ u.nombre_completo }}</td>
+                                            <td><code>{{ u.username }}</code></td>
+                                            <td>
+                                                {% if u.es_directivo() %}
+                                                    <span class="badge bg-primary">Directivo</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">Administrativo</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if u.activo %}
+                                                    <span class="badge bg-success">Activo</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger">Desactivado</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-muted small">
+                                                {{ u.ultimo_acceso.strftime('%d/%m/%Y %H:%M') if u.ultimo_acceso else 'Nunca' }}
+                                            </td>
+                                            <td class="text-end">
+                                                {% if u.id != current_user.id %}
+                                                    <form action="{{ url_for('toggle_usuario', user_id=u.id) }}" method="POST" class="d-inline"
+                                                          onsubmit="return confirm('¿{{ 'Desactivar' if u.activo else 'Activar' }} la cuenta de {{ u.nombre_completo }}?');">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                        <button type="submit" class="btn btn-sm {{ 'btn-outline-danger' if u.activo else 'btn-outline-success' }}">
+                                                            {% if u.activo %}
+                                                                <i class="bi bi-slash-circle me-1"></i>Desactivar
+                                                            {% else %}
+                                                                <i class="bi bi-check-circle me-1"></i>Activar
+                                                            {% endif %}
+                                                        </button>
+                                                    </form>
+                                                {% else %}
+                                                    <span class="text-muted small fst-italic">Tu cuenta</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

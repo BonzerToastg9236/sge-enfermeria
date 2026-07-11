@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Registro de Nuevo Ingreso</title>
+
+    <!-- Bootstrap 5 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body {
+            background-color: #f4f6f9;
+        }
+
+        .hero-registro {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff;
+            padding: 3.5rem 1rem 4.5rem 1rem;
+            border-bottom-left-radius: 40px;
+            border-bottom-right-radius: 40px;
+            text-align: center;
+        }
+
+        .form-card {
+            margin-top: -3rem;
+            border: none;
+            border-radius: 18px;
+        }
+
+        .section-title {
+            font-weight: 700;
+            color: #0d6efd;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .section-title i {
+            font-size: 1.1rem;
+        }
+
+        .section-block {
+            padding: 1.5rem;
+            background-color: #f8f9fb;
+            border-radius: 14px;
+            margin-bottom: 1.75rem;
+            border: 1px solid #eef0f4;
+        }
+
+        .form-label {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #33383f;
+        }
+
+        .form-label .text-danger {
+            font-weight: 700;
+        }
+
+        .form-control, .form-select {
+            border-radius: 10px;
+            padding: 0.65rem 0.9rem;
+            border: 1px solid #d7dce2;
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+        }
+
+        /* CURP: sugiere mayúsculas obligatorias */
+        #curp {
+            text-transform: uppercase;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+
+        .form-text-counter {
+            font-size: 0.78rem;
+        }
+
+        .btn-registro {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            border: none;
+            font-weight: 600;
+            padding: 0.85rem 1.5rem;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .btn-registro:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 0.75rem 1.25rem rgba(13, 110, 253, 0.3);
+            color: #fff;
+        }
+
+        .btn-registro:disabled {
+            opacity: 0.75;
+        }
+
+        .nota-verificacion {
+            background-color: #fff8e6;
+            border: 1px solid #ffe4a0;
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            font-size: 0.9rem;
+            color: #7a5c00;
+        }
+
+        /* Feedback de validación de Bootstrap ya cubre lo esencial;
+           reforzamos el estado inválido para que resalte más. */
+        .was-validated .form-control:invalid,
+        .was-validated .form-select:invalid {
+            border-color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HERO -->
+    <div class="hero-registro">
+        <!-- BARRA DE NAVEGACIÓN -->
+        <div class="d-flex justify-content-between align-items-center mb-4 px-1">
+            <span class="fw-semibold">
+                <i class="bi bi-mortarboard-fill me-1"></i> SGE
+            </span>
+            <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
+                <i class="bi bi-search me-1"></i> Ir al Buscador
+            </a>
+        </div>
+
+        <h1 class="fw-bold"><i class="bi bi-person-plus-fill me-2"></i>Registro de Nuevo Ingreso</h1>
+        <p class="fs-5 mb-0 opacity-75">Universidad de Enfermería &mdash; Control Escolar</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+
+                <!-- MENSAJES FLASH -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ 'success' if category == 'success' else category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi {{ 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' }} me-1"></i>
+                                    {{ message|safe }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <!-- FORMULARIO -->
+                <div class="card form-card shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        <p class="text-muted mb-4">
+                            Completa tus datos personales para generar tu matrícula. Tu solicitud
+                            quedará en estatus <strong>"Pendiente de Validación"</strong> hasta que
+                            Control Escolar confirme tu documentación.
+                        </p>
+
+                        <form action="{{ url_for('registro') }}" method="POST" class="needs-validation" novalidate id="formRegistro">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                            <!-- DATOS PERSONALES -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-person-vcard"></i> Datos Personales</div>
+
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label for="nombre_completo" class="form-label">
+                                            Nombre Completo <span class="text-danger">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            id="nombre_completo"
+                                            name="nombre_completo"
+                                            placeholder="Ej. María Fernanda López Ramírez"
+                                            minlength="5"
+                                            required
+                                        >
+                                        <div class="invalid-feedback">
+                                            Ingresa tu nombre completo tal como aparece en tu acta de nacimiento.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label for="curp" class="form-label">
+                                            CURP <span class="text-danger">*</span>
+                                            <span class="text-muted fw-normal">(18 caracteres, MAYÚSCULAS)</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            id="curp"
+                                            name="curp"
+                                            placeholder="XXXX000000XXXXXX00"
+                                            minlength="18"
+                                            maxlength="18"
+                                            pattern="^[A-Za-z0-9]{18}$"
+                                            required
+                                        >
+                                        <div class="d-flex justify-content-between">
+                                            <div class="invalid-feedback">
+                                                La CURP debe tener exactamente 18 caracteres alfanuméricos.
+                                            </div>
+                                            <small class="form-text text-muted form-text-counter">
+                                                <span id="curpCount">0</span>/18
+                                            </small>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-4">
+                                        <label for="sexo" class="form-label">Sexo <span class="text-danger">*</span></label>
+                                        <select class="form-select" id="sexo" name="sexo" required>
+                                            <option value="" selected disabled>Selecciona...</option>
+                                            <option value="Femenino">Femenino</option>
+                                            <option value="Masculino">Masculino</option>
+                                            <option value="Otro">Otro</option>
+                                        </select>
+                                        <div class="invalid-feedback">Selecciona tu sexo.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="estado_civil" class="form-label">Estado Civil</label>
+                                        <select class="form-select" id="estado_civil" name="estado_civil">
+                                            <option value="Soltero/a" selected>Soltero/a</option>
+                                            <option value="Casado/a">Casado/a</option>
+                                            <option value="Unión Libre">Unión Libre</option>
+                                            <option value="Divorciado/a">Divorciado/a</option>
+                                            <option value="Viudo/a">Viudo/a</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="tipo_sangre" class="form-label">Tipo de Sangre</label>
+                                        <select class="form-select" id="tipo_sangre" name="tipo_sangre">
+                                            <option value="" selected disabled>Selecciona...</option>
+                                            <option value="O+">O+</option>
+                                            <option value="O-">O-</option>
+                                            <option value="A+">A+</option>
+                                            <option value="A-">A-</option>
+                                            <option value="B+">B+</option>
+                                            <option value="B-">B-</option>
+                                            <option value="AB+">AB+</option>
+                                            <option value="AB-">AB-</option>
+                                            <option value="No sé">No sé</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="nacionalidad" class="form-label">Nacionalidad</label>
+                                        <input type="text" class="form-control" id="nacionalidad" name="nacionalidad" value="Mexicana">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="numero_identificacion" class="form-label">
+                                            Número de Identificación Oficial (INE, etc.)
+                                        </label>
+                                        <input type="text" class="form-control" id="numero_identificacion" name="numero_identificacion"
+                                               placeholder="Opcional">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- MODALIDAD Y TURNO -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-mortarboard"></i> Modalidad de Estudio</div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="modalidad" class="form-label">Modalidad <span class="text-danger">*</span></label>
+                                        <select class="form-select" id="modalidad" name="modalidad" required>
+                                            <option value="" selected disabled>Selecciona...</option>
+                                            <option value="ESCOLARIZADO">Escolarizado</option>
+                                            <option value="SEMIESCOLARIZADO">Semiescolarizado</option>
+                                            <option value="DISTANCIA">A Distancia</option>
+                                        </select>
+                                        <div class="invalid-feedback">Selecciona la modalidad.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="turno" class="form-label">Turno <span class="text-danger">*</span></label>
+                                        <select class="form-select" id="turno" name="turno" required>
+                                            <option value="" selected disabled>Selecciona...</option>
+                                            <option value="MATUTINO">Matutino</option>
+                                            <option value="VESPERTINO">Vespertino</option>
+                                            <option value="MIXTO">Mixto</option>
+                                        </select>
+                                        <div class="invalid-feedback">Selecciona el turno.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- DOCUMENTACIÓN -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-file-earmark-text"></i> Documentación</div>
+
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="fecha_nacimiento" class="form-label">
+                                            Fecha de Nacimiento <span class="text-danger">*</span>
+                                        </label>
+                                        <input
+                                            type="date"
+                                            class="form-control"
+                                            id="fecha_nacimiento"
+                                            name="fecha_nacimiento"
+                                            required
+                                        >
+                                        <div class="invalid-feedback">
+                                            Selecciona tu fecha de nacimiento.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="fecha_certificado_prepa" class="form-label">
+                                            Fecha del Certificado de Preparatoria <span class="text-danger">*</span>
+                                        </label>
+                                        <input
+                                            type="date"
+                                            class="form-control"
+                                            id="fecha_certificado_prepa"
+                                            name="fecha_certificado_prepa"
+                                            required
+                                        >
+                                        <small class="text-muted d-block mt-1">
+                                            <i class="bi bi-info-circle me-1"></i>(como viene en el certificado)
+                                        </small>
+                                        <div class="invalid-feedback">
+                                            Indica la fecha de expedición de tu certificado.
+                                        </div>
+                                    </div>
+
+                                    {% if planes %}
+                                    <div class="col-12">
+                                        <label for="id_plan_fk" class="form-label">
+                                            Carrera / Plan de Estudios <span class="text-danger">*</span>
+                                        </label>
+                                        <select class="form-select" id="id_plan_fk" name="id_plan_fk" required>
+                                            <option value="" selected disabled>Selecciona tu carrera...</option>
+                                            {% for plan in planes %}
+                                                <option value="{{ plan.id }}">{{ plan.nombre }} ({{ plan.anio_generacion }})</option>
+                                            {% endfor %}
+                                        </select>
+                                        <div class="invalid-feedback">
+                                            Selecciona la carrera a la que deseas ingresar.
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            <!-- DOMICILIO -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-house-door"></i> Domicilio</div>
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label for="domicilio_calle_numero" class="form-label">
+                                            Calle y Número <span class="text-danger">*</span>
+                                        </label>
+                                        <input type="text" class="form-control" id="domicilio_calle_numero" name="domicilio_calle_numero"
+                                               placeholder="Ej. Av. Juárez #123" required>
+                                        <div class="invalid-feedback">Indica tu calle y número.</div>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label for="domicilio_ciudad" class="form-label">Ciudad / Municipio <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="domicilio_ciudad" name="domicilio_ciudad" required>
+                                        <div class="invalid-feedback">Indica tu ciudad o municipio.</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="domicilio_cp" class="form-label">C.P. <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="domicilio_cp" name="domicilio_cp"
+                                               maxlength="5" pattern="^[0-9]{5}$" placeholder="00000" required>
+                                        <div class="invalid-feedback">Código postal de 5 dígitos.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="domicilio_estado" class="form-label">Estado <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="domicilio_estado" name="domicilio_estado" required>
+                                        <div class="invalid-feedback">Indica tu estado.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CONTACTO (OPCIONAL) -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-telephone"></i> Datos de Contacto <span class="text-muted fw-normal text-lowercase">(opcional)</span></div>
+
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="correo" class="form-label">Correo Electrónico</label>
+                                        <input
+                                            type="email"
+                                            class="form-control"
+                                            id="correo"
+                                            name="correo"
+                                            placeholder="tucorreo@ejemplo.com"
+                                        >
+                                        <div class="invalid-feedback">
+                                            Ingresa un correo electrónico válido.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="telefono" class="form-label">Teléfono Fijo</label>
+                                        <input
+                                            type="tel"
+                                            class="form-control"
+                                            id="telefono"
+                                            name="telefono"
+                                            placeholder="Ej. 55 1234 5678"
+                                            pattern="^[0-9\s\-\+\(\)]{7,20}$"
+                                        >
+                                        <div class="invalid-feedback">
+                                            Ingresa un número de teléfono válido.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="telefono_movil" class="form-label">Teléfono Móvil</label>
+                                        <input
+                                            type="tel"
+                                            class="form-control"
+                                            id="telefono_movil"
+                                            name="telefono_movil"
+                                            placeholder="Ej. 55 8765 4321"
+                                            pattern="^[0-9\s\-\+\(\)]{7,20}$"
+                                        >
+                                        <div class="invalid-feedback">
+                                            Ingresa un número de teléfono válido.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CONTACTO DE EMERGENCIA -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-person-exclamation"></i> Contacto de Emergencia</div>
+                                <p class="text-muted small mb-3">
+                                    Persona a la que se pueda llamar en caso de no localizarte a ti directamente.
+                                </p>
+                                <div class="row g-3">
+                                    <div class="col-md-5">
+                                        <label for="contacto_emergencia_nombre" class="form-label">
+                                            Nombre Completo <span class="text-danger">*</span>
+                                        </label>
+                                        <input type="text" class="form-control" id="contacto_emergencia_nombre"
+                                               name="contacto_emergencia_nombre" required>
+                                        <div class="invalid-feedback">Indica el nombre de tu contacto de emergencia.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="contacto_emergencia_telefono" class="form-label">
+                                            Teléfono <span class="text-danger">*</span>
+                                        </label>
+                                        <input type="tel" class="form-control" id="contacto_emergencia_telefono"
+                                               name="contacto_emergencia_telefono" pattern="^[0-9\s\-\+\(\)]{7,20}$" required>
+                                        <div class="invalid-feedback">Indica un teléfono válido.</div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="contacto_emergencia_parentesco" class="form-label">Parentesco</label>
+                                        <input type="text" class="form-control" id="contacto_emergencia_parentesco"
+                                               name="contacto_emergencia_parentesco" placeholder="Ej. Madre, Hermana">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CÓMO TE ENTERASTE -->
+                            <div class="section-block">
+                                <div class="section-title"><i class="bi bi-megaphone"></i> ¿Cómo te enteraste de nosotros? <span class="text-muted fw-normal text-lowercase">(opcional)</span></div>
+                                <input type="text" class="form-control" id="como_se_entero" name="como_se_entero"
+                                       placeholder="Ej. Por una amiga, redes sociales, un cartel, etc.">
+                            </div>
+
+                            <!-- BOTÓN DE ENVÍO -->
+                            <div class="d-grid mt-4">
+                                <button type="submit" class="btn btn-primary btn-registro" id="btnRegistro">
+                                    <i class="bi bi-person-plus-fill me-2"></i>
+                                    <span id="btnRegistroTexto">Completar Registro</span>
+                                </button>
+                            </div>
+
+                            <!-- NOTA INFORMATIVA -->
+                            <div class="nota-verificacion mt-4">
+                                <i class="bi bi-info-circle-fill me-1"></i>
+                                Verifica que tus datos sean correctos antes de enviar, especialmente
+                                tu <strong>CURP</strong> y fechas de documentos: son la base para
+                                generar tu matrícula y validar tu expediente. Errores aquí pueden
+                                retrasar tu proceso de inscripción.
+                            </div>
+
+                        </form>
+                    </div>
+                </div>
+
+                <div class="text-center text-muted my-4 small">
+                    <i class="bi bi-shield-lock me-1"></i>
+                    Tus datos son manejados de forma confidencial por Control Escolar.
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            'use strict';
+
+            const form = document.getElementById('formRegistro');
+            const curpInput = document.getElementById('curp');
+            const curpCount = document.getElementById('curpCount');
+            const btnRegistro = document.getElementById('btnRegistro');
+            const btnTexto = document.getElementById('btnRegistroTexto');
+
+            // Fuerza mayúsculas en tiempo real y actualiza el contador de CURP
+            curpInput.addEventListener('input', function () {
+                const cursor = this.selectionStart;
+                this.value = this.value.toUpperCase();
+                this.setSelectionRange(cursor, cursor);
+                curpCount.textContent = this.value.length;
+            });
+
+            // Validación visual inmediata (Bootstrap) + efecto de carga en el envío
+            form.addEventListener('submit', function (event) {
+                if (!form.checkValidity()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                } else {
+                    // Evita doble envío y muestra estado de "procesando"
+                    btnRegistro.disabled = true;
+                    btnTexto.textContent = 'Procesando registro...';
+                    btnRegistro.querySelector('i').className = 'spinner-border spinner-border-sm me-2';
+                }
+                form.classList.add('was-validated');
+            }, false);
+        })();
+    </script>
+</body>
+</html>

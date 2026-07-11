@@ -1,0 +1,14 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.36
+Flask-Migrate==4.0.7
+Flask-Login==0.6.3
+Flask-WTF==1.2.2
+Flask-Limiter==3.8.0
+python-dotenv==1.0.1
+gunicorn==22.0.0
+
+# NOTA: psycopg2-binary (conector de PostgreSQL) se movió a requirements-prod.txt
+# porque solo se necesita en el VPS de producción. En desarrollo local usamos
+# SQLite y no requiere ningún driver adicional. Instálalo solo si vas a
+# conectarte a PostgreSQL:  pip install -r requirements-prod.txt

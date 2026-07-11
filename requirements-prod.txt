@@ -1,0 +1,8 @@
+# Dependencias adicionales para PRODUCCIÓN (VPS con PostgreSQL).
+# Instalar además de requirements.txt, solo en el servidor:
+#
+#   pip install -r requirements.txt -r requirements-prod.txt
+#
+# En desarrollo local (SQLite) NO necesitas este archivo.
+
+psycopg2-binary==2.9.10

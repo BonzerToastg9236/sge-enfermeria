@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Expediente - {{ alumno.nombre_completo }}</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+
+        .hero-exp {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff;
+            padding: 3rem 1rem 4rem 1rem;
+            border-bottom-left-radius: 40px;
+            border-bottom-right-radius: 40px;
+            text-align: center;
+        }
+
+        .avatar-circle-lg {
+            width: 72px; height: 72px; border-radius: 50%;
+            background-color: rgba(255,255,255,0.2);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 1.8rem; margin: 0 auto 0.75rem auto;
+        }
+
+        .card-perfil { margin-top: -3rem; border: none; border-radius: 18px; }
+
+        .dato-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.4px; color: #8a94a3; font-weight: 700; margin-bottom: 0.15rem; }
+        .dato-valor { font-weight: 600; color: #2a2f38; }
+
+        .stat-box {
+            border-radius: 14px; padding: 1rem 1.25rem; text-align: center;
+            background-color: #f8f9fb; border: 1px solid #eef0f4;
+        }
+        .stat-numero { font-size: 1.8rem; font-weight: 800; color: #0d6efd; }
+        .stat-label { font-size: 0.8rem; color: #6b7280; font-weight: 600; }
+
+        .accordion-button:not(.collapsed) { background-color: #eaf3ff; color: #0a4fb5; }
+        .accordion-button:focus { box-shadow: none; }
+
+        .badge-nota-aprobada { background-color: #198754; }
+        .badge-nota-reprobada { background-color: #dc3545; }
+        .badge-nota-pendiente { background-color: #adb5bd; }
+
+        @media print {
+            .no-imprimir { display: none !important; }
+            .hero-exp { background: none !important; color: #000 !important; border-radius: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero-exp">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1 no-imprimir">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            <div class="d-flex align-items-center gap-2">
+                <a href="{{ url_for('index') }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-search me-1"></i> Buscador
+                </a>
+                <a href="{{ url_for('documentos', matricula=alumno.matricula_id) }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-cloud-arrow-up me-1"></i> Documentos
+                </a>
+                <a href="{{ url_for('ficha_inscripcion', matricula=alumno.matricula_id) }}" class="btn btn-light btn-sm fw-semibold">
+                    <i class="bi bi-file-earmark-person me-1"></i> Ficha de Inscripción
+                </a>
+                <a href="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="btn btn-warning btn-sm fw-semibold">
+                    <i class="bi bi-journal-text me-1"></i> Capturar Boleta
+                </a>
+                <div class="dropdown">
+                    <button class="btn btn-outline-light btn-sm dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-person-circle me-1"></i> {{ current_user.nombre_completo }}
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">{{ current_user.rol.value }}</h6></li>
+                        <li><a class="dropdown-item" href="{{ url_for('perfil') }}"><i class="bi bi-person-gear me-2"></i>Mi Perfil</a></li>
+                        {% if current_user.es_directivo() %}
+                            <li><a class="dropdown-item" href="{{ url_for('usuarios') }}"><i class="bi bi-people me-2"></i>Administrativos</a></li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right me-2"></i>Cerrar Sesión</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="avatar-circle-lg">{{ alumno.nombre_completo[:1]|upper }}</div>
+        <h1 class="fw-bold mb-0">{{ alumno.nombre_completo }}</h1>
+        <p class="fs-6 mb-0 opacity-75">{{ alumno.matricula_id }} &middot; {{ alumno.plan.nombre if alumno.plan else 'Sin plan' }}</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+
+                <!-- FLASH -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4 no-imprimir">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card card-perfil shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        <!-- ALERTAS RÁPIDAS -->
+                        {% if alumno.documentacion_pendiente or alumno.materias_adeudadas or alumno.faltas_administrativas %}
+                            <div class="d-flex flex-wrap gap-2 mb-4">
+                                {% if alumno.documentacion_pendiente %}
+                                    <span class="badge bg-warning text-dark px-3 py-2"><i class="bi bi-exclamation-triangle-fill me-1"></i>Documentación pendiente</span>
+                                {% endif %}
+                                {% if alumno.materias_adeudadas %}
+                                    <span class="badge bg-danger px-3 py-2"><i class="bi bi-journal-x me-1"></i>Debe materias</span>
+                                {% endif %}
+                                {% if alumno.faltas_administrativas %}
+                                    <span class="badge bg-secondary px-3 py-2"><i class="bi bi-flag-fill me-1"></i>Faltas administrativas</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+
+                        <!-- DATOS PERSONALES -->
+                        <div class="row g-4 mb-4">
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">CURP</div>
+                                <div class="dato-valor">{{ alumno.curp }}</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Edad</div>
+                                <div class="dato-valor">{{ alumno.edad() }} años</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Cuatrimestre Actual</div>
+                                <div class="dato-valor">{{ alumno.cuatrimestre_actual }}°</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Estatus</div>
+                                <span class="badge
+                                    {% if alumno.estatus.name == 'ACTIVO' %} bg-success
+                                    {% elif alumno.estatus.name == 'PENDIENTE' %} bg-warning text-dark
+                                    {% elif alumno.estatus.name == 'EGRESADO' %} bg-info text-dark
+                                    {% else %} bg-secondary
+                                    {% endif %}">
+                                    {{ alumno.estatus.value }}
+                                </span>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Correo</div>
+                                <div class="dato-valor">{{ alumno.correo or '—' }}</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Teléfono</div>
+                                <div class="dato-valor">{{ alumno.telefono or '—' }}</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Teléfono Tutor</div>
+                                <div class="dato-valor">{{ alumno.telefono_tutor or '—' }}</div>
+                            </div>
+                            <div class="col-md-3 col-6">
+                                <div class="dato-label">Escuela Preparatoria</div>
+                                <div class="dato-valor">{{ alumno.escuela_prepa or '—' }}</div>
+                            </div>
+                        </div>
+
+                        <!-- CAMBIAR ESTATUS -->
+                        <div class="section-block-estatus p-3 mb-4 rounded-3 no-imprimir" style="background-color:#f8f9fb; border:1px solid #eef0f4;">
+                            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                                <h6 class="fw-bold mb-0"><i class="bi bi-arrow-repeat me-1"></i>Cambiar Estatus del Alumno</h6>
+                                {% if historial_estatus %}
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#historialEstatus">
+                                        <i class="bi bi-clock-history me-1"></i> Ver historial ({{ historial_estatus|length }})
+                                    </button>
+                                {% endif %}
+                            </div>
+
+                            {% if materias_no_aprobadas %}
+                                <div class="alert alert-warning py-2 small mb-3">
+                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                    Tiene <strong>{{ materias_no_aprobadas|length }}</strong> materia(s) sin aprobar:
+                                    {{ materias_no_aprobadas[:5]|map(attribute='nombre')|join(', ') }}{% if materias_no_aprobadas|length > 5 %} y {{ materias_no_aprobadas|length - 5 }} más{% endif %}.
+                                    Márcalo como Egresado solo si tienes justificación (se te pedirá un comentario).
+                                </div>
+                            {% endif %}
+
+                            <form action="{{ url_for('cambiar_estatus', matricula=alumno.matricula_id) }}" method="POST" id="formEstatus" class="row g-2 align-items-end">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <div class="col-md-5">
+                                    <select name="nuevo_estatus" id="nuevoEstatusSelect" class="form-select">
+                                        {% for est in estatus_disponibles %}
+                                            <option value="{{ est.name }}" {% if est == alumno.estatus %}selected{% endif %}>
+                                                {{ est.value }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-5" id="campoComentario" style="{% if not materias_no_aprobadas %}display:none;{% endif %}">
+                                    <input type="text" name="comentario" class="form-control" placeholder="Comentario / justificación (requerido para Egresado con materias pendientes)">
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-check-circle me-1"></i> Guardar
+                                    </button>
+                                </div>
+                            </form>
+
+                            {% if historial_estatus %}
+                                <div class="collapse mt-3" id="historialEstatus">
+                                    <hr>
+                                    <ul class="list-unstyled small mb-0">
+                                        {% for h in historial_estatus %}
+                                            <li class="mb-2">
+                                                <span class="text-muted">{{ h.fecha.strftime('%d/%m/%Y %H:%M') }}</span>
+                                                &mdash;
+                                                {% if h.estatus_anterior %}{{ h.estatus_anterior.value }} → {% endif %}
+                                                <strong>{{ h.estatus_nuevo.value }}</strong>
+                                                {% if h.usuario %} por {{ h.usuario.nombre_completo }}{% endif %}
+                                                {% if h.comentario %} <em class="text-muted">("{{ h.comentario }}")</em>{% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- PROMEDIO GENERAL -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-numero">{{ '%.2f'|format(alumno.promedio_general()) }}</div>
+                                    <div class="stat-label">PROMEDIO GENERAL</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-numero">{{ alumno.calificaciones|length }}</div>
+                                    <div class="stat-label">MATERIAS CALIFICADAS</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-numero">{{ cuatrimestres|length }}</div>
+                                    <div class="stat-label">CUATRIMESTRES EN EL PLAN</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0"><i class="bi bi-journal-bookmark me-2"></i>Historial por Cuatrimestre</h5>
+                            <button class="btn btn-outline-primary btn-sm no-imprimir" onclick="window.print()">
+                                <i class="bi bi-printer me-1"></i> Generar Historial (Imprimir)
+                            </button>
+                        </div>
+
+                        <!-- ACORDEÓN POR CUATRIMESTRE -->
+                        <div class="accordion" id="acordeonCuatrimestres">
+                            {% for cuatri, items in cuatrimestres.items()|sort %}
+                                <div class="accordion-item mb-2">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button {% if not loop.first %}collapsed{% endif %}" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#cuatri{{ cuatri }}">
+                                            {{ cuatri }}° Cuatrimestre
+                                            <span class="badge bg-light text-dark border ms-2">{{ items|length }} materia(s)</span>
+                                        </button>
+                                    </h2>
+                                    <div id="cuatri{{ cuatri }}" class="accordion-collapse collapse {% if loop.first %}show{% endif %}"
+                                         data-bs-parent="#acordeonCuatrimestres">
+                                        <div class="accordion-body p-0">
+                                            <table class="table table-striped mb-0">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Materia</th>
+                                                        <th class="text-center">Calificación</th>
+                                                        <th class="text-center">Periodo</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in items %}
+                                                        <tr>
+                                                            <td>{{ item.materia.nombre }}</td>
+                                                            <td class="text-center">
+                                                                {% if item.calificacion %}
+                                                                    <span class="badge {{ 'badge-nota-aprobada' if item.calificacion.calificacion_final >= 6 else 'badge-nota-reprobada' }}">
+                                                                        {{ '%.1f'|format(item.calificacion.calificacion_final) }}
+                                                                    </span>
+                                                                {% else %}
+                                                                    <span class="badge badge-nota-pendiente">Pendiente</span>
+                                                                {% endif %}
+                                                            </td>
+                                                            <td class="text-center text-muted">
+                                                                {{ item.calificacion.periodo_escolar if item.calificacion else '—' }}
+                                                            </td>
+                                                        </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            const select = document.getElementById('nuevoEstatusSelect');
+            const campoComentario = document.getElementById('campoComentario');
+            const hayMateriasNoAprobadas = {{ (materias_no_aprobadas|length > 0) | tojson }};
+
+            function actualizarVisibilidad() {
+                const esEgresado = select.value === 'EGRESADO';
+                campoComentario.style.display = (esEgresado && hayMateriasNoAprobadas) ? '' : 'none';
+            }
+
+            select.addEventListener('change', actualizarVisibilidad);
+            actualizarVisibilidad();
+        })();
+    </script>
+</body>
+</html>
