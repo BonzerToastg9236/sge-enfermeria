@@ -112,7 +112,7 @@
                         <div class="mt-4">
                             {% for category, message in messages %}
                                 <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message|safe }}
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
                                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                                 </div>
                             {% endfor %}
@@ -324,7 +324,7 @@
                             <div class="section-block mt-2">
                                 <div class="section-title"><i class="bi bi-folder-check"></i> Documentos ya subidos</div>
                                 {% for doc in documentos %}
-                                    {% set url_doc = url_for('static', filename='uploads/documentos/' + doc.ruta_archivo) %}
+                                    {% set url_doc = url_for('ver_documento', matricula=alumno.matricula_id, doc_id=doc.id) %}
                                     {% set es_pdf = doc.nombre_archivo_original.lower().endswith('.pdf') %}
                                     <div class="documento-existente">
                                         <span>

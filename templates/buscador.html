@@ -198,6 +198,14 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
+                    <a href="{{ url_for('index', filtro='con_adeudo') }}" class="text-decoration-none">
+                        <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos con Adeudo Económico' }}">
+                            <div class="stat-numero text-danger">{{ estadisticas.con_adeudo }}</div>
+                            <div class="stat-label">Con Adeudo</div>
+                        </div>
+                    </a>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
                     <a href="{{ url_for('index', filtro='recientes') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Últimos 10 Alumnos Registrados' }}">
                             <div class="stat-numero text-primary">{{ estadisticas.total }}</div>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Catálogo de Conceptos de Cobro</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-conceptos {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-conceptos { margin-top: -3rem; border: none; border-radius: 18px; }
+        .btn-guardar { background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%); border: none; font-weight: 600; border-radius: 12px; }
+    </style>
+</head>
+<body>
+
+    <div class="hero-conceptos">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-tags-fill me-2"></i>Catálogo de Conceptos de Cobro</h1>
+        <p class="mb-0 opacity-75">Colegiatura, Inscripción, Servicio Social, Uniformes, etc.</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-7">
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card card-conceptos shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        <form action="{{ url_for('conceptos_cobro') }}" method="POST" class="row g-2 align-items-end mb-4">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-md-8">
+                                <label class="form-label">Nuevo Concepto</label>
+                                <input type="text" class="form-control" name="nombre" placeholder="Ej. Cobro de Uniformes" required>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="submit" class="btn btn-primary btn-guardar w-100">
+                                    <i class="bi bi-plus-circle me-1"></i> Agregar
+                                </button>
+                            </div>
+                        </form>
+
+                        <div class="table-responsive">
+                            <table class="table table-striped align-middle">
+                                <thead>
+                                    <tr><th>Concepto</th><th>Estatus</th><th class="text-end">Acción</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for concepto in conceptos %}
+                                        <tr>
+                                            <td>{{ concepto.nombre }}</td>
+                                            <td>
+                                                {% if concepto.activo %}
+                                                    <span class="badge bg-success">Activo</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">Desactivado</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-end">
+                                                <form action="{{ url_for('toggle_concepto_cobro', concepto_id=concepto.id) }}" method="POST" class="d-inline">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                    <button type="submit" class="btn btn-sm {{ 'btn-outline-danger' if concepto.activo else 'btn-outline-success' }}">
+                                                        {% if concepto.activo %}Desactivar{% else %}Activar{% endif %}
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <p class="text-muted small mb-0">
+                            Desactivar un concepto no borra los cargos ya creados con él — solo deja de
+                            aparecer como opción al capturar cargos nuevos.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

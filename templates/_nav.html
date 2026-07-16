@@ -1,9 +1,12 @@
 {# ============================================================
    MENÚ LATERAL COMPARTIDO (Offcanvas)
    Se incluye con {% include '_nav.html' %} en cada página interna.
+   Cada sección se filtra según el ROL del usuario:
+     - puede_alumnos(): Directivo, Administrativo, Capturador
+     - puede_cobros():  Directivo, Administrativo, Contador
    Si la página define la variable `alumno` (documentos, expediente,
-   boleta, ficha_inscripcion), se agrega automáticamente la sección
-   "Alumno Actual" con accesos directos a sus 4 vistas.
+   boleta, ficha_inscripcion, cobros, estado_cuenta), se agrega
+   automáticamente la sección "Alumno Actual".
    ============================================================ #}
 
 <button class="btn btn-outline-light btn-sm fw-semibold" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuLateral">
@@ -42,15 +45,66 @@
                 <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-folder2-open me-2 text-primary"></i> Expediente
                 </a>
-                <a href="{{ url_for('documentos', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
-                    <i class="bi bi-cloud-arrow-up me-2 text-primary"></i> Documentos
+                {% if current_user.puede_alumnos() %}
+                    <a href="{{ url_for('documentos', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-cloud-arrow-up me-2 text-primary"></i> Documentos
+                    </a>
+                    <a href="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-journal-text me-2 text-primary"></i> Capturar Boleta
+                    </a>
+                    <a href="{{ url_for('ficha_inscripcion', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-file-earmark-person me-2 text-primary"></i> Ficha de Inscripción
+                    </a>
+                {% endif %}
+                {% if current_user.puede_cobros() %}
+                    <a href="{{ url_for('cobros', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-cash-coin me-2 text-primary"></i> Cobros
+                    </a>
+                    <a href="{{ url_for('estado_cuenta', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-journal-text me-2 text-primary"></i> Estado de Cuenta
+                    </a>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if current_user.puede_cobros() %}
+            <div class="px-3 pt-3 pb-1">
+                <small class="text-uppercase fw-bold text-muted" style="letter-spacing:0.5px;">
+                    <i class="bi bi-cash-stack me-1"></i>Cobros
+                </small>
+            </div>
+            <div class="list-group list-group-flush">
+                <a href="{{ url_for('reporte_cobros_del_dia') }}" class="list-group-item list-group-item-action py-3">
+                    <i class="bi bi-graph-up me-2 text-primary"></i> Reporte de Cobros del Día
                 </a>
-                <a href="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
-                    <i class="bi bi-journal-text me-2 text-primary"></i> Capturar Boleta
-                </a>
-                <a href="{{ url_for('ficha_inscripcion', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
-                    <i class="bi bi-file-earmark-person me-2 text-primary"></i> Ficha de Inscripción
-                </a>
+                {% if current_user.es_directivo() or current_user.rol.name == 'CONTADOR' %}
+                    <a href="{{ url_for('conceptos_cobro') }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-tags-fill me-2 text-primary"></i> Catálogo de Conceptos
+                    </a>
+                    <a href="{{ url_for('configuracion_cobros') }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-sliders me-2 text-primary"></i> Configuración de Recargos
+                    </a>
+                {% endif %}
+                {% if current_user.es_directivo() %}
+                    <a href="{{ url_for('planes_mensualidades') }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-cash-stack me-2 text-primary"></i> Mensualidades por Carrera
+                    </a>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if current_user.puede_alumnos() %}
+            <div class="px-3 pt-3 pb-1">
+                <small class="text-uppercase fw-bold text-muted" style="letter-spacing:0.5px;">
+                    <i class="bi bi-people me-1"></i>Alumnos
+                </small>
+            </div>
+            <div class="list-group list-group-flush">
+                {% if current_user.es_directivo() %}
+                    <a href="{{ url_for('importar_alumnos') }}" class="list-group-item list-group-item-action py-3">
+                        <i class="bi bi-file-earmark-spreadsheet me-2 text-primary"></i> Carga Masiva de Alumnos
+                    </a>
+                {% endif %}
             </div>
         {% endif %}
 

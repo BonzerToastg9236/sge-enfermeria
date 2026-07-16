@@ -21,7 +21,7 @@ más adelante, la captura de calificaciones sin tener que dar de alta todo
 a mano. Es idempotente: si un plan ya existe (misma clave + año), lo omite.
 """
 
-from app import app, db, PlanEstudio, Materia
+from app import app, db, PlanEstudio, Materia, ConceptoCobro, ConfiguracionCobros, TipoRecargo
 
 # ---------------------------------------------------------------------------
 # Definición de planes de estudio de ejemplo.
@@ -149,6 +149,30 @@ def sembrar():
 
             db.session.commit()
             print(f'Plan creado: {plan} con {total_materias} materias.')
+
+        # --- Catálogo de conceptos de cobro ---
+        CONCEPTOS_DEMO = [
+            'Inscripción',
+            'Reinscripción',
+            'Colegiatura',
+            'Recargo por Atraso',
+            'Servicio Social',
+            'Uniformes',
+            'Material Didáctico',
+        ]
+        for nombre in CONCEPTOS_DEMO:
+            if not ConceptoCobro.query.filter_by(nombre=nombre).first():
+                db.session.add(ConceptoCobro(nombre=nombre, activo=True))
+        db.session.commit()
+        print(f'Catálogo de conceptos de cobro listo ({len(CONCEPTOS_DEMO)} conceptos).')
+
+        # --- Configuración de recargos (neutral: $0 hasta que Dirección la ajuste) ---
+        config = ConfiguracionCobros.obtener()
+        print(
+            f'Configuración de recargos: {config.tipo_recargo.value}, '
+            f'valor ${config.valor_recargo}, {config.dias_gracia} día(s) de gracia. '
+            'Ajústala en /configuracion/cobros.'
+        )
 
 
 if __name__ == '__main__':

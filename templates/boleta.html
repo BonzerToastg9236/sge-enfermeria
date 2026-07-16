@@ -132,7 +132,7 @@
                         <div class="mt-4 no-imprimir">
                             {% for category, message in messages %}
                                 <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message|safe }}
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
                                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                                 </div>
                             {% endfor %}
@@ -196,19 +196,28 @@
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                                 <div class="row g-3 mb-3 no-imprimir">
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <label class="form-label">Periodo Escolar <span class="text-danger">*</span></label>
                                         <input type="text" class="form-control" name="periodo_escolar" placeholder="Ej. 2026-A" required>
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <label class="form-label">Número de Acta</label>
                                         <input type="text" class="form-control" name="numero_acta" placeholder="Ej. ACTA-0158">
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label">Capturado por</label>
-                                        <input type="text" class="form-control" name="capturado_por" placeholder="Nombre del administrativo">
-                                    </div>
                                 </div>
+                                <!--
+                                    SECURITY-NOTE: el campo "Capturado por" se quitó del formulario a
+                                    propósito. Antes era un <input> de texto libre, así que cualquiera
+                                    podía escribir el nombre de otra persona y el registro de auditoría
+                                    de calificaciones no era confiable. Ahora el backend usa siempre
+                                    current_user.nombre_completo (la sesión con la que se inició sesión),
+                                    igual que ya se hacía para registrar quién generó un cargo o un pago.
+                                -->
+                                <p class="text-muted small mb-3 no-imprimir">
+                                    <i class="bi bi-person-check me-1"></i>
+                                    Esta captura quedará registrada a nombre de
+                                    <strong>{{ current_user.nombre_completo }}</strong> (tu sesión actual).
+                                </p>
 
                                 {% if materias %}
                                     <table class="table table-bordered tabla-boleta align-middle">

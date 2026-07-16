@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Configuración de Recargos</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-config {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-config { margin-top: -3rem; border: none; border-radius: 18px; }
+        .btn-guardar { background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%); border: none; font-weight: 600; border-radius: 12px; padding: 0.75rem; }
+        .ejemplo-box { background-color: #eaf3ff; border-radius: 10px; padding: 1rem; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+
+    <div class="hero-config">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-sliders me-2"></i>Configuración de Recargos</h1>
+        <p class="mb-0 opacity-75">Ajusta la fórmula de recargo por atraso de tu institución</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-6">
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="mt-4">
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card card-config shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        <p class="text-muted small">
+                            Este recargo se calcula automáticamente cada vez que se consulta el
+                            estado de un alumno con un cargo vencido — no necesitas hacer nada
+                            manualmente. Si cambias esta configuración, aplica de inmediato a los
+                            cargos que sigan vencidos a partir de ahora.
+                        </p>
+
+                        <form method="POST" action="{{ url_for('configuracion_cobros') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Tipo de Recargo</label>
+                                <select class="form-select" name="tipo_recargo" id="tipoRecargo">
+                                    {% for tipo in tipos_recargo %}
+                                        <option value="{{ tipo.name }}" {% if tipo == config.tipo_recargo %}selected{% endif %}>
+                                            {{ tipo.value }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold" id="labelValor">Valor</label>
+                                <input type="number" step="0.01" min="0" class="form-control" name="valor_recargo"
+                                       value="{{ config.valor_recargo }}" required>
+                                <small class="text-muted" id="ayudaValor"></small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label fw-semibold">Días de Gracia</label>
+                                <input type="number" min="0" class="form-control" name="dias_gracia" value="{{ config.dias_gracia }}">
+                                <small class="text-muted">
+                                    Días después del vencimiento antes de empezar a generar recargo (0 = aplica desde el día siguiente al vencimiento).
+                                </small>
+                            </div>
+
+                            <div class="ejemplo-box mb-4">
+                                <i class="bi bi-lightbulb me-1"></i>
+                                <strong>Configuración actual:</strong> {{ config.tipo_recargo.value }},
+                                valor ${{ config.valor_recargo }}, {{ config.dias_gracia }} día(s) de gracia.
+                            </div>
+
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-guardar">
+                                    <i class="bi bi-check-circle me-1"></i> Guardar Configuración
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const textos = {
+            'MONTO_FIJO': 'Monto en pesos que se cobra UNA sola vez al cargo vencido.',
+            'PORCENTAJE': 'Porcentaje (ej. 5 = 5%) que se aplica sobre el monto original del cargo.',
+            'POR_DIA': 'Monto en pesos que se multiplica por cada día de atraso (crece cada día).',
+        };
+        const select = document.getElementById('tipoRecargo');
+        const ayuda = document.getElementById('ayudaValor');
+
+        function actualizarAyuda() {
+            ayuda.textContent = textos[select.value] || '';
+        }
+        select.addEventListener('change', actualizarAyuda);
+        actualizarAyuda();
+    </script>
+</body>
+</html>
