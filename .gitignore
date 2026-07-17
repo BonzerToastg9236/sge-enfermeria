@@ -3,7 +3,7 @@ __pycache__/
 .env
 venv/
 env/
-instance/*.db
+instance/
 .vscode/
 *.log
 static/uploads/

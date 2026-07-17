@@ -42,10 +42,14 @@ else
 fi
 
 # --- 2. Comprimir la carpeta de documentos subidos ---
-UPLOADS_BACKUP_FILE="$BACKUP_DIR/uploads_${FECHA}.tar.gz"
+# SECURITY-NOTE: esta ruta cambió de static/uploads/ a instance/documentos_alumnos/
+# porque los documentos de alumnos (INE, CURP, actas) ya NO viven dentro de
+# static/ -- static/ se sirve públicamente sin login (tanto por Flask como por
+# el alias /static/ de Nginx), así que había que sacarlos de ahí.
+UPLOADS_BACKUP_FILE="$BACKUP_DIR/documentos_${FECHA}.tar.gz"
 
-if [ -d "$APP_DIR/static/uploads" ]; then
-    if tar -czf "$UPLOADS_BACKUP_FILE" -C "$APP_DIR/static" uploads; then
+if [ -d "$APP_DIR/instance/documentos_alumnos" ]; then
+    if tar -czf "$UPLOADS_BACKUP_FILE" -C "$APP_DIR/instance" documentos_alumnos; then
         TAMANO=$(du -h "$UPLOADS_BACKUP_FILE" | cut -f1)
         echo "[$FECHA] OK: Documentos respaldados ($TAMANO) -> $UPLOADS_BACKUP_FILE" >> "$LOG_FILE"
     else
@@ -53,7 +57,7 @@ if [ -d "$APP_DIR/static/uploads" ]; then
         exit 1
     fi
 else
-    echo "[$FECHA] AVISO: aún no existe carpeta de uploads, se omite este respaldo." >> "$LOG_FILE"
+    echo "[$FECHA] AVISO: aún no existe carpeta de documentos, se omite este respaldo." >> "$LOG_FILE"
     UPLOADS_BACKUP_FILE=""
 fi
 
@@ -76,6 +80,6 @@ fi
 # (los respaldos remotos, si usas rclone, no se borran aquí — configura su
 #  propia política de retención del lado del proveedor si lo necesitas)
 find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +$RETENTION_DIAS -delete
-find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime +$RETENTION_DIAS -delete
+find "$BACKUP_DIR" -name "documentos_*.tar.gz" -mtime +$RETENTION_DIAS -delete
 
 echo "[$FECHA] --- Backup completado ---" >> "$LOG_FILE"

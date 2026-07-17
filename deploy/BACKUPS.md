@@ -14,7 +14,7 @@ entre un inconveniente y una catástrofe real para la escuela.
 `deploy/backup.sh` hace 2 cosas cada vez que corre:
 
 1. **`pg_dump`** de toda la base de datos PostgreSQL, comprimido con gzip.
-2. **`tar`** de toda la carpeta `static/uploads/` (los documentos subidos).
+2. **`tar`** de toda la carpeta `instance/documentos_alumnos/` (los documentos subidos -- esta carpeta vive fuera de `static/` a propósito, porque `static/` se sirve públicamente sin login).
 
 Ambos se guardan con fecha y hora en el nombre, así que cada corrida deja
 un respaldo nuevo sin borrar los anteriores (hasta que la rotación los
@@ -118,7 +118,7 @@ resultado por correo) — dímelo si te interesa.
 cd ~/sge_enfermeria
 chmod +x deploy/restore.sh   # si no lo hiciste ya
 
-./deploy/restore.sh ~/backups/db_2026-07-15_03-00-00.sql.gz ~/backups/uploads_2026-07-15_03-00-00.tar.gz
+./deploy/restore.sh ~/backups/db_2026-07-15_03-00-00.sql.gz ~/backups/documentos_2026-07-15_03-00-00.tar.gz
 ```
 
 Te va a pedir confirmación explícita (escribir "si") antes de sobreescribir

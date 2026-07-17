@@ -17,8 +17,8 @@ set -euo pipefail
 # ============================================================
 
 if [ "$#" -ne 2 ]; then
-    echo "Uso: ./restore.sh <db_backup.sql.gz> <uploads_backup.tar.gz>"
-    echo "Ejemplo: ./restore.sh /home/sge/backups/db_2026-07-15_03-00-00.sql.gz /home/sge/backups/uploads_2026-07-15_03-00-00.tar.gz"
+    echo "Uso: ./restore.sh <db_backup.sql.gz> <documentos_backup.tar.gz>"
+    echo "Ejemplo: ./restore.sh /home/sge/backups/db_2026-07-15_03-00-00.sql.gz /home/sge/backups/documentos_2026-07-15_03-00-00.tar.gz"
     exit 1
 fi
 
@@ -53,8 +53,8 @@ echo "Restaurando base de datos desde $DB_BACKUP ..."
 gunzip -c "$DB_BACKUP" | psql -U "$DB_USER" -h localhost "$DB_NAME"
 
 echo "Restaurando documentos desde $UPLOADS_BACKUP ..."
-rm -rf "$APP_DIR/static/uploads"
-tar -xzf "$UPLOADS_BACKUP" -C "$APP_DIR/static"
+rm -rf "$APP_DIR/instance/documentos_alumnos"
+tar -xzf "$UPLOADS_BACKUP" -C "$APP_DIR/instance"
 
 echo "Reiniciando la aplicación (systemctl start sge)..."
 sudo systemctl start sge
