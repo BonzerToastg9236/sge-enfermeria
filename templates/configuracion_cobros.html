@@ -107,11 +107,12 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const textos = {
-            'MONTO_FIJO': 'Monto en pesos que se cobra UNA sola vez al cargo vencido.',
-            'PORCENTAJE': 'Porcentaje (ej. 5 = 5%) que se aplica sobre el monto original del cargo.',
-            'POR_DIA': 'Monto en pesos que se multiplica por cada día de atraso (crece cada día).',
-        };
+       const textos = {
+    'MONTO_FIJO': 'Monto en pesos que se cobra UNA sola vez al cargo vencido.',
+    'PORCENTAJE': 'Porcentaje (ej. 5 = 5%) que se aplica sobre el monto original del cargo.',
+    'POR_DIA': 'Monto en pesos que se multiplica por cada día de atraso (crece cada día).',
+    'PORCENTAJE_MENSUAL': 'Porcentaje (ej. 10 = 10%) del monto original que se SUMA cada mes completo de atraso. Ej: mensualidad $2,000 con 10% -> $200 el primer mes vencido, $400 el segundo, etc.',
+};
         const select = document.getElementById('tipoRecargo');
         const ayuda = document.getElementById('ayudaValor');
 
