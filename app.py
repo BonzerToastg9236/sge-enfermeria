@@ -20,7 +20,19 @@ import enum
 import io
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def ahora_utc():
+    """
+    Reemplazo de datetime.utcnow() (deprecado desde Python 3.12). Devuelve
+    un datetime NAIVE en UTC -- igual que utcnow() devolvía -- para no
+    cambiar cómo se comparan/guardan las fechas ya existentes en la BD
+    (columnas DateTime sin timezone). datetime.now(timezone.utc) por sí solo
+    devuelve un datetime AWARE, que no se puede comparar directamente con
+    los naive que ya hay guardados -- por eso el .replace(tzinfo=None).
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 
@@ -330,7 +342,7 @@ class Alumno(db.Model):
 
     def edad(self) -> int:
         """Calcula la edad actual del alumno a partir de su fecha de nacimiento."""
-        hoy = datetime.utcnow().date()
+        hoy = ahora_utc().date()
         anios = hoy.year - self.fecha_nacimiento.year
         # Ajusta si aún no ha cumplido años este año
         if (hoy.month, hoy.day) < (self.fecha_nacimiento.month, self.fecha_nacimiento.day):
@@ -618,7 +630,7 @@ class Cargo(db.Model):
         return (
             self.estatus not in (EstatusCargo.PAGADO, EstatusCargo.CANCELADO)
             and self.fecha_vencimiento is not None
-            and self.fecha_vencimiento < datetime.utcnow().date()
+            and self.fecha_vencimiento < ahora_utc().date()
         )
 
     def actualizar_recargo_si_vencido(self):
@@ -637,7 +649,7 @@ class Cargo(db.Model):
             return
 
         config = ConfiguracionCobros.obtener()
-        hoy = datetime.utcnow().date()
+        hoy = ahora_utc().date()
         dias_de_atraso = (hoy - self.fecha_vencimiento).days - config.dias_gracia
 
         if config.tipo_recargo == TipoRecargo.MONTO_FIJO:
@@ -760,7 +772,7 @@ def limite_intentos_excedido(error):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Usuario.query.get(int(user_id))
+    return db.session.get(Usuario, int(user_id))
 
 
 def es_url_segura(destino: str) -> bool:
@@ -822,7 +834,7 @@ def login():
         if usuario and usuario.activo and usuario.check_password(password):
             session.permanent = True  # Activa PERMANENT_SESSION_LIFETIME (expira tras 8h de inactividad)
             login_user(usuario, remember=recordar)
-            usuario.ultimo_acceso = datetime.utcnow()
+            usuario.ultimo_acceso = ahora_utc()
             db.session.commit()
 
             flash(f'Bienvenido, {usuario.nombre_completo}.', 'success')
@@ -1112,7 +1124,7 @@ def generar_matricula(plan: 'PlanEstudio') -> str:
     todos modos ocurre un choque (ej. dos registros "primeros" del mismo
     prefijo, exactamente al mismo tiempo, donde no hay fila que bloquear).
     """
-    anio_actual = datetime.utcnow().year
+    anio_actual = ahora_utc().year
     prefijo = f"{plan.clave_carrera}{anio_actual}-"
 
     consulta = (
@@ -1254,7 +1266,7 @@ def registro():
         errores.append('Debes seleccionar tu carrera / plan de estudios.')
     else:
         try:
-            plan = PlanEstudio.query.get(int(id_plan_raw))
+            plan = db.session.get(PlanEstudio, int(id_plan_raw))
         except (ValueError, TypeError):
             plan = None
         if not plan or not plan.activo:
@@ -1662,7 +1674,7 @@ def documentos(matricula):
 
             os.makedirs(carpeta_alumno, exist_ok=True)
             nombre_seguro = secure_filename(archivo.filename)
-            nombre_final = f'{tipo_doc.name}_{int(datetime.utcnow().timestamp())}_{nombre_seguro}'
+            nombre_final = f'{tipo_doc.name}_{int(ahora_utc().timestamp())}_{nombre_seguro}'
             ruta_absoluta = os.path.join(carpeta_alumno, nombre_final)
             archivo.save(ruta_absoluta)
 
@@ -1898,7 +1910,7 @@ def cambiar_estatus(matricula):
     alumno.estatus = nuevo_estatus
 
     if nuevo_estatus == EstatusAlumno.ACTIVO and not alumno.fecha_validacion:
-        alumno.fecha_validacion = datetime.utcnow()
+        alumno.fecha_validacion = ahora_utc()
 
     db.session.add(registro)
     db.session.commit()
@@ -1965,7 +1977,7 @@ def nuevo_cargo(matricula):
         errores.append('Selecciona un concepto del catálogo.')
     else:
         try:
-            concepto_cobro = ConceptoCobro.query.get(int(concepto_cobro_id_raw))
+            concepto_cobro = db.session.get(ConceptoCobro, int(concepto_cobro_id_raw))
         except (ValueError, TypeError):
             concepto_cobro = None
         if not concepto_cobro or not concepto_cobro.activo:
@@ -2084,7 +2096,7 @@ def registrar_pago(cargo_id):
     db.session.add(pago)
     db.session.flush()  # Asigna pago.id (lo necesitamos para armar el folio) y refleja el pago en saldo_pendiente()
 
-    pago.folio = f'PAGO-{datetime.utcnow().year}-{pago.id:06d}'
+    pago.folio = f'PAGO-{ahora_utc().year}-{pago.id:06d}'
 
     cargo.actualizar_estatus()
     db.session.commit()
@@ -2161,9 +2173,9 @@ def reporte_cobros_del_dia():
     """
     fecha_raw = request.args.get('fecha', '')
     try:
-        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else datetime.utcnow().date()
+        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else ahora_utc().date()
     except ValueError:
-        fecha_reporte = datetime.utcnow().date()
+        fecha_reporte = ahora_utc().date()
         flash('La fecha indicada no era válida; se muestra el día de hoy.', 'warning')
 
     inicio_dia = datetime.combine(fecha_reporte, datetime.min.time())
