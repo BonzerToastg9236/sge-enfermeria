@@ -126,34 +126,45 @@
         <div class="row justify-content-center">
             <div class="col-lg-9">
 
-                <!-- FLASH -->
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mt-4 no-imprimir">
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
 
                 <div class="card card-boleta shadow-lg">
                     <div class="card-body p-4 p-md-5">
 
+                        <!-- FLASH -->
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4 no-imprimir">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message|safe }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
+
                         <!-- SELECTOR DE CUATRIMESTRE (recarga la lista de materias del "Escudo") -->
                         <form method="GET" action="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="row g-2 align-items-end mb-4 no-imprimir">
                             <div class="col-auto">
-                                <label class="form-label mb-1"><i class="bi bi-funnel me-1"></i>Cuatrimestre a capturar</label>
+                                <label class="form-label mb-1"><i class="bi bi-funnel me-1"></i>{{ config_institucion.nombre_periodo_singular }} a capturar</label>
                                 <select name="cuatrimestre" class="form-select" onchange="this.form.submit()">
                                     {% for c in range(1, max_cuatrimestres + 1) %}
                                         <option value="{{ c }}" {% if c == cuatrimestre_seleccionado %}selected{% endif %}>
-                                            {{ c }}° Cuatrimestre
+                                            {{ c }}° {{ config_institucion.nombre_periodo_singular }}
                                         </option>
                                     {% endfor %}
                                 </select>
+                            </div>
+                            <div class="col-auto">
+                                <a href="{{ url_for('historial_calificaciones', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-clock-history me-1"></i> Ver Historial de Cambios
+                                </a>
+                            </div>
+                            <div class="col-auto">
+                                <a href="{{ url_for('carga_academica', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-journal-bookmark-fill me-1"></i> Carga Académica
+                                </a>
                             </div>
                         </form>
 
@@ -179,11 +190,11 @@
                                     <div class="dato-valor">{{ alumno.matricula_id }}</div>
                                 </div>
                                 <div class="col-md-6">
-                                    <div class="dato-label">Carrera / Plan</div>
+                                    <div class="dato-label">{{ config_institucion.nombre_programa_singular }} / Plan</div>
                                     <div class="dato-valor">{{ alumno.plan.nombre if alumno.plan else '—' }}</div>
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="dato-label">Cuatrimestre</div>
+                                    <div class="dato-label">{{ config_institucion.nombre_periodo_singular }}</div>
                                     <div class="dato-valor">{{ cuatrimestre_seleccionado }}°</div>
                                 </div>
                                 <div class="col-md-3">
@@ -196,28 +207,21 @@
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                                 <div class="row g-3 mb-3 no-imprimir">
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="form-label">Periodo Escolar <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" name="periodo_escolar" placeholder="Ej. 2026-A" required>
+                                        <input type="text" class="form-control" name="periodo_escolar" value="{{ periodo_escolar_sugerido }}" placeholder="Ej. 2026-A" required>
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="form-label">Número de Acta</label>
-                                        <input type="text" class="form-control" name="numero_acta" placeholder="Ej. ACTA-0158">
+                                        <input type="text" class="form-control" value="Se genera al guardar" disabled>
+                                        <small class="text-muted">Un folio nuevo por cada envío, no se edita.</small>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">Capturado por</label>
+                                        <input type="text" class="form-control" value="{{ current_user.nombre_completo }}" disabled>
+                                        <small class="text-muted">Se toma de tu sesión, no se puede editar.</small>
                                     </div>
                                 </div>
-                                <!--
-                                    SECURITY-NOTE: el campo "Capturado por" se quitó del formulario a
-                                    propósito. Antes era un <input> de texto libre, así que cualquiera
-                                    podía escribir el nombre de otra persona y el registro de auditoría
-                                    de calificaciones no era confiable. Ahora el backend usa siempre
-                                    current_user.nombre_completo (la sesión con la que se inició sesión),
-                                    igual que ya se hacía para registrar quién generó un cargo o un pago.
-                                -->
-                                <p class="text-muted small mb-3 no-imprimir">
-                                    <i class="bi bi-person-check me-1"></i>
-                                    Esta captura quedará registrada a nombre de
-                                    <strong>{{ current_user.nombre_completo }}</strong> (tu sesión actual).
-                                </p>
 
                                 {% if materias %}
                                     <table class="table table-bordered tabla-boleta align-middle">
@@ -258,7 +262,7 @@
                                     <div class="alert alert-warning">
                                         <i class="bi bi-exclamation-triangle-fill me-1"></i>
                                         El plan de estudios de este alumno no tiene materias registradas para el
-                                        {{ cuatrimestre_seleccionado }}° cuatrimestre.
+                                        {{ cuatrimestre_seleccionado }}° {{ config_institucion.nombre_periodo_singular|lower }}.
                                     </div>
                                 {% endif %}
                             </form>

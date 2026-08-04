@@ -106,22 +106,23 @@
         <div class="row justify-content-center">
             <div class="col-lg-9">
 
-                <!-- FLASH -->
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mt-4">
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
 
                 <div class="card form-card shadow-lg">
                     <div class="card-body p-4 p-md-5">
+
+                        <!-- FLASH -->
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message|safe }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
 
                         {% if alumno.documentacion_pendiente or alumno.materias_adeudadas or alumno.faltas_administrativas %}
                             <div class="d-flex flex-wrap gap-2 mb-4">
@@ -166,7 +167,7 @@
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Carrera / Plan</label>
+                                    <label class="form-label">{{ config_institucion.nombre_programa_singular }} / Plan</label>
                                     <div class="dato-solo-lectura">{{ alumno.plan.nombre if alumno.plan else '—' }}</div>
                                 </div>
                             </div>
@@ -274,11 +275,11 @@
                                 <div class="section-title"><i class="bi bi-clipboard2-check"></i> Seguimiento Administrativo y Académico</div>
                                 <div class="row g-3">
                                     <div class="col-md-4">
-                                        <label for="cuatrimestre_actual" class="form-label">¿En qué cuatrimestre va / inició?</label>
+                                        <label for="cuatrimestre_actual" class="form-label">¿En qué {{ config_institucion.nombre_periodo_singular|lower }} va / inició?</label>
                                         <select class="form-select" id="cuatrimestre_actual" name="cuatrimestre_actual">
                                             {% for c in range(1, max_cuatrimestres + 1) %}
                                                 <option value="{{ c }}" {% if alumno.cuatrimestre_actual == c %}selected{% endif %}>
-                                                    {{ c }}° Cuatrimestre
+                                                    {{ c }}° {{ config_institucion.nombre_periodo_singular }}
                                                 </option>
                                             {% endfor %}
                                         </select>
@@ -381,7 +382,7 @@
                     <!-- El contenido (img o iframe) se inyecta con JS -->
                 </div>
                 <div class="modal-footer">
-                    <a id="modalDocumentoAbrirNueva" href="#" target="_blank" class="btn btn-outline-secondary btn-sm">
+                    <a id="modalDocumentoAbrirNueva" href="#" class="btn btn-outline-secondary btn-sm">
                         <i class="bi bi-box-arrow-up-right me-1"></i> Abrir en pestaña nueva
                     </a>
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>

@@ -15,6 +15,20 @@ reutilizamos ESE MISMO objeto y le sobreescribimos la configuración para
 que apunte a una base de datos en memoria durante las pruebas.
 """
 
+import os
+# CRÍTICO: esto tiene que pasar ANTES de "from app import app as flask_app".
+# app.py ejecuta `app = create_app(os.environ.get('FLASK_ENV', 'development'))`
+# en el momento en que se importa -- si para entonces ya le dijimos que use
+# 'testing', la conexión de SQLAlchemy se crea bien desde el primer
+# instante, apuntando a memoria. Antes, cambiábamos app.config DESPUÉS de
+# que la conexión ya se había creado con la configuración de desarrollo
+# (tu archivo real) -- ese cambio tardío no bastaba para que SQLAlchemy
+# olvidara la conexión vieja, y create_all()/drop_all() terminaban
+# operando sobre instance/sge_dev.db de verdad, sin que se notara. Esto
+# es lo que probablemente causó que las tablas desaparecieran varias
+# veces durante el desarrollo.
+os.environ['FLASK_ENV'] = 'testing'
+
 import pytest
 from datetime import date
 
@@ -34,10 +48,22 @@ from config import config_by_name
 
 @pytest.fixture
 def app():
-    """La app real de la aplicación, reconfigurada para pruebas."""
-    flask_app.config.from_object(config_by_name['testing'])
-
+    """
+    La app real de la aplicación. Ya quedó configurada para pruebas desde
+    el momento del import (ver os.environ['FLASK_ENV'] arriba), así que
+    aquí ya no hace falta cambiar la configuración en caliente.
+    """
     with flask_app.app_context():
+        # SEGURO: si por cualquier motivo esto no fuera una base de datos
+        # en memoria, es preferible que truene aquí con un mensaje claro a
+        # que create_all()/drop_all() operen en silencio sobre tu base de
+        # datos real.
+        uri_actual = str(_db.engine.url)
+        assert 'memory' in uri_actual, (
+            f'¡ALTO! Las pruebas están a punto de usar "{uri_actual}" en vez '
+            'de una base de datos en memoria. Revisa FLASK_ENV en conftest.py.'
+        )
+
         _db.create_all()
         _limiter.reset()  # Limpia el contador de intentos de login entre pruebas
         yield flask_app
@@ -69,9 +95,17 @@ def crear_materia(plan, nombre='Materia de Prueba', cuatrimestre=1):
     return materia
 
 
-def crear_alumno(plan, curp='ABCD010101HDFXYZ01', nombre='Alumno de Prueba', estatus=EstatusAlumno.ACTIVO):
+def crear_alumno(plan, curp='ABCD010101HDFXYZ01', nombre='Alumno de Prueba', estatus=EstatusAlumno.ACTIVO, matricula_id=None):
+    """
+    matricula_id es opcional: por defecto usa el mismo texto fijo de
+    siempre ('{clave}{año}-TEST'), para no romper ninguna prueba
+    existente. Pero si una prueba necesita 2+ alumnos DEL MISMO plan al
+    mismo tiempo (ej. comparar uno Activo contra uno Pendiente), ese
+    texto fijo choca -- para esos casos, pásale un matricula_id distinto
+    a cada llamada.
+    """
     alumno = Alumno(
-        matricula_id=f'{plan.clave_carrera}{plan.anio_generacion}-TEST',
+        matricula_id=matricula_id or f'{plan.clave_carrera}{plan.anio_generacion}-TEST',
         nombre_completo=nombre,
         curp=curp,
         fecha_nacimiento=date(2005, 1, 1),

@@ -97,14 +97,21 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     """
     Configuración exclusiva para pytest. Base de datos en memoria (se crea
-    y destruye por cada test, nunca toca tu sge_dev.db real), sin CSRF ni
-    rate limiting para no complicar las pruebas de rutas.
+    y destruye por cada test, nunca toca tu sge_dev.db real), sin CSRF
+    para no complicar las pruebas de rutas.
+
+    NOTA: el límite de intentos de login (Flask-Limiter) se deja
+    funcionando IGUAL que en producción (no se desactiva aquí) --
+    desactivarlo desde el arranque hace que Flask-Limiter se salte la
+    configuración de su almacenamiento por completo, y luego truene en
+    tiempo de ejecución. En vez de desactivarlo, el fixture de pruebas
+    llama a limiter.reset() antes de cada prueba, así que los intentos
+    nunca se acumulan de una prueba a otra.
     """
     TESTING = True
     SECRET_KEY = 'clave-de-pruebas-no-usar-en-produccion'
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
     WTF_CSRF_ENABLED = False
-    RATELIMIT_ENABLED = False
     MAIL_SUPPRESS_SEND = True  # Nunca manda correos reales al correr pytest
 
 

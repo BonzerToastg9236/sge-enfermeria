@@ -41,21 +41,22 @@
         <div class="row justify-content-center">
             <div class="col-lg-9">
 
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mt-4 no-imprimir">
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
 
                 <div class="card card-reporte shadow-lg">
                     <div class="card-body p-4 p-md-5">
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4 no-imprimir">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
 
                         <!-- SELECTOR DE FECHA -->
                         <form method="GET" action="{{ url_for('reporte_cobros_del_dia') }}" class="row g-2 align-items-end mb-4 no-imprimir">
@@ -67,6 +68,11 @@
                                 <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
                                     <i class="bi bi-printer me-1"></i> Imprimir
                                 </button>
+                            </div>
+                            <div class="col-auto">
+                                <a href="{{ url_for('exportar_reporte_cobros_del_dia', fecha=fecha_reporte.isoformat()) }}" class="btn btn-outline-success">
+                                    <i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel
+                                </a>
                             </div>
                         </form>
 

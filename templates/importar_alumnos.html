@@ -48,21 +48,22 @@
         <div class="row justify-content-center">
             <div class="col-lg-9">
 
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mt-4">
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi bi-info-circle me-1"></i>{{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
 
                 <div class="card card-importar shadow-lg">
                     <div class="card-body p-4 p-md-5">
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
 
                         <!-- PASO 1 -->
                         <div class="section-block">
@@ -72,7 +73,7 @@
                                     <h6 class="fw-bold mb-1">Descarga la plantilla</h6>
                                     <p class="text-muted small mb-0">
                                         Trae las columnas exactas que el sistema espera, más una hoja "Guía"
-                                        con las claves de carrera válidas y qué significa cada columna.
+                                        con las claves de {{ config_institucion.nombre_programa_singular|lower }} válidas y qué significa cada columna.
                                         Las columnas en <strong>azul</strong> son obligatorias; las de
                                         <strong>gris</strong> son opcionales.
                                     </p>
@@ -106,7 +107,7 @@
                                 <div>
                                     <h6 class="fw-bold mb-1">Sube el archivo lleno</h6>
                                     <p class="text-muted small mb-0">
-                                        El sistema valida cada fila individualmente (CURP, fechas, carrera
+                                        El sistema valida cada fila individualmente (CURP, fechas, {{ config_institucion.nombre_programa_singular|lower }}
                                         válida). Las filas correctas se importan; las que tengan errores se
                                         te muestran abajo con el detalle exacto para que las corrijas y
                                         vuelvas a intentar solo esas.

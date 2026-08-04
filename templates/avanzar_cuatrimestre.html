@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Avanzar de Periodo</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-avanzar {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-avanzar { margin-top: -3rem; border: none; border-radius: 18px; }
+        .btn-avanzar {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            border: none; font-weight: 600; border-radius: 12px; padding: 0.8rem 1.5rem;
+        }
+        .tabla-resultado th { font-size: 0.8rem; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+    <div class="hero-avanzar">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-arrow-right-circle-fill me-2"></i>Avanzar de {{ config_institucion.nombre_periodo_singular }} en Lote</h1>
+        <p class="mb-0 opacity-75">Pasa a todo un grupo de alumnos activos al siguiente {{ config_institucion.nombre_periodo_singular|lower }} de una sola vez</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-9">
+
+                <div class="card card-avanzar shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4 mb-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
+
+                        <div class="alert alert-info small">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Se buscan todos los alumnos <strong>Activos</strong> de {{ config_institucion.esa_programa }} {{ config_institucion.nombre_programa_singular|lower }} y {{ config_institucion.nombre_periodo_singular|lower }} que
+                            elijas abajo, y a cada uno se le genera: su cargo de Reinscripción, las mensualidades
+                            del nuevo {{ config_institucion.nombre_periodo_singular|lower }}, y su nueva carga académica — igual que si lo hicieras uno por
+                            uno desde su expediente. Nunca duplica si alguno ya se había avanzado antes.
+                        </div>
+
+                        <form method="POST" class="row g-2 align-items-end mb-4">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-md-6">
+                                <label class="form-label">{{ config_institucion.nombre_programa_singular }}</label>
+                                <select class="form-select" name="plan_id" required>
+                                    <option value="" selected disabled>Selecciona...</option>
+                                    {% for plan in planes %}
+                                        <option value="{{ plan.id }}">{{ plan.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Están actualmente en el...</label>
+                                <select class="form-select" name="cuatrimestre_actual" required>
+                                    {% for c in range(1, max_cuatrimestres) %}
+                                        <option value="{{ c }}">{{ c }}° {{ config_institucion.nombre_periodo_singular }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <button type="submit" class="btn btn-primary btn-avanzar w-100">
+                                    <i class="bi bi-arrow-right-circle me-1"></i> Avanzar
+                                </button>
+                            </div>
+                        </form>
+
+                        {% if avanzados is defined %}
+                            {% if avanzados %}
+                                <div class="mt-4">
+                                    <h6 class="fw-bold text-success">
+                                        <i class="bi bi-check-circle-fill me-1"></i>
+                                        {{ avanzados|length }} alumno(s) avanzaron
+                                    </h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped tabla-resultado">
+                                            <thead>
+                                                <tr><th>Alumno</th><th>Matrícula</th><th>Cargos generados</th><th>Materias asignadas</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for item in avanzados %}
+                                                    <tr>
+                                                        <td>{{ item.alumno.nombre_completo }}</td>
+                                                        <td><code>{{ item.alumno.matricula_id }}</code></td>
+                                                        <td>{{ item.cargos }}</td>
+                                                        <td>{{ item.materias }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            {% endif %}
+
+                            {% if omitidos %}
+                                <div class="mt-4">
+                                    <h6 class="fw-bold text-warning">
+                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                        {{ omitidos|length }} alumno(s) omitidos
+                                    </h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped tabla-resultado">
+                                            <thead>
+                                                <tr><th>Alumno</th><th>Matrícula</th><th>Motivo</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for item in omitidos %}
+                                                    <tr>
+                                                        <td>{{ item.alumno.nombre_completo }}</td>
+                                                        <td><code>{{ item.alumno.matricula_id }}</code></td>
+                                                        <td class="text-muted small">{{ item.motivo }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% endif %}
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

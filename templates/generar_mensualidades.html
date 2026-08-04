@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Generar Mensualidades</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-gm {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-gm { margin-top: -3rem; border: none; border-radius: 18px; }
+        .btn-generar { background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%); border: none; font-weight: 600; border-radius: 12px; padding: 0.8rem 1.5rem; }
+        .aviso-box { background-color: #fff3cd; border: 1px solid #ffe69c; border-radius: 10px; padding: 1rem; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+
+    <div class="hero-gm">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-collection-fill me-2"></i>Generar Mensualidades en Lote</h1>
+        <p class="mb-0 opacity-75">Crea el cargo del periodo para todos los alumnos activos de una sola vez</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+
+
+                <div class="card card-gm shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
+
+                        <div class="aviso-box mb-4">
+                            <i class="bi bi-lightbulb me-1"></i>
+                            Se le crea el cargo a cada alumno con estatus <strong>Activo</strong>, usando la
+                            mensualidad configurada en <em>Mensualidades por {{ config_institucion.nombre_programa_singular }}</em>. Los alumnos cuyo
+                            plan no tenga mensualidad definida, o que ya tengan un cargo de ese concepto y
+                            periodo, se omiten automáticamente (verás el detalle abajo).
+                        </div>
+
+                        <form method="POST" action="{{ url_for('generar_mensualidades') }}" class="row g-3 mb-4">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Concepto</label>
+                                <select class="form-select" name="concepto_cobro_id" required>
+                                    <option value="" selected disabled>Selecciona un concepto</option>
+                                    {% for concepto in conceptos %}
+                                        <option value="{{ concepto.id }}">{{ concepto.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Periodo Escolar</label>
+                                <input type="text" class="form-control" name="periodo_escolar" value="{{ periodo_escolar_sugerido }}" placeholder="Ej. 2026-A" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Fecha de Vencimiento (opcional)</label>
+                                <input type="date" class="form-control" name="fecha_vencimiento" value="{{ vencimiento_sugerido }}">
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary btn-generar">
+                                    <i class="bi bi-collection-fill me-1"></i> Generar Cargos
+                                </button>
+                            </div>
+                        </form>
+
+                        {% if generados is defined %}
+                            <hr>
+                            <h6 class="fw-bold text-success">
+                                <i class="bi bi-check-circle-fill me-1"></i>
+                                {{ generados|length }} cargo(s) generado(s)
+                            </h6>
+                            {% if omitidos %}
+                                <h6 class="fw-bold text-warning mt-3">
+                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                    {{ omitidos|length }} alumno(s) omitido(s)
+                                </h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead><tr><th>Alumno</th><th>Matrícula</th><th>Motivo</th></tr></thead>
+                                        <tbody>
+                                            {% for item in omitidos %}
+                                                <tr>
+                                                    <td>{{ item.alumno.nombre_completo }}</td>
+                                                    <td><code>{{ item.alumno.matricula_id }}</code></td>
+                                                    <td class="text-muted small">{{ item.motivo }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% endif %}
+                        {% endif %}
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

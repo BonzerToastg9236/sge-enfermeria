@@ -146,24 +146,25 @@
         <div class="row justify-content-center">
             <div class="col-lg-8">
 
-                <!-- MENSAJES FLASH -->
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mt-4">
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ 'success' if category == 'success' else category }} alert-dismissible fade show shadow-sm" role="alert">
-                                    <i class="bi {{ 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' }} me-1"></i>
-                                    {{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                                </div>
-                            {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
 
                 <!-- FORMULARIO -->
                 <div class="card form-card shadow-lg">
                     <div class="card-body p-4 p-md-5">
+
+                        <!-- MENSAJES FLASH -->
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mt-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ 'success' if category == 'success' else category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi {{ 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' }} me-1"></i>
+                                            {{ message|safe }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
 
                         <p class="text-muted mb-4">
                             Completa tus datos personales para generar tu matrícula. Tu solicitud
@@ -342,16 +343,16 @@
                                     {% if planes %}
                                     <div class="col-12">
                                         <label for="id_plan_fk" class="form-label">
-                                            Carrera / Plan de Estudios <span class="text-danger">*</span>
+                                            {{ config_institucion.nombre_programa_singular }} / Plan de Estudios <span class="text-danger">*</span>
                                         </label>
                                         <select class="form-select" id="id_plan_fk" name="id_plan_fk" required>
-                                            <option value="" selected disabled>Selecciona tu carrera...</option>
+                                            <option value="" selected disabled>Selecciona tu {{ config_institucion.nombre_programa_singular|lower }}...</option>
                                             {% for plan in planes %}
                                                 <option value="{{ plan.id }}">{{ plan.nombre }} ({{ plan.anio_generacion }})</option>
                                             {% endfor %}
                                         </select>
                                         <div class="invalid-feedback">
-                                            Selecciona la carrera a la que deseas ingresar.
+                                            Selecciona {{ config_institucion.esa_programa }} {{ config_institucion.nombre_programa_singular|lower }} a la que deseas ingresar.
                                         </div>
                                     </div>
                                     {% endif %}

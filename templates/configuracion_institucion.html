@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Configuración de la Institución</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-config {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .card-config { margin-top: -3rem; border: none; border-radius: 18px; }
+        .ejemplo-box {
+            background-color: #eef4ff; border-radius: 10px; padding: 1rem 1.25rem;
+            font-size: 0.9rem; color: #0a4fb5;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero-config">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-gear-fill me-2"></i>Configuración de la Institución</h1>
+        <p class="mb-0 opacity-75">Adapta la terminología del sistema a tu tipo de escuela</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-7">
+
+                <div class="card card-config shadow-lg">
+                    <div class="card-body p-4 p-md-5">
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                <div class="mb-4">
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+                                            <i class="bi bi-info-circle me-1"></i>{{ message }}
+                                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endwith %}
+
+                        <div class="ejemplo-box mb-4">
+                            <strong><i class="bi bi-lightbulb me-1"></i> ¿Para qué sirve esto?</strong>
+                            El sistema funciona igual para cualquier nivel educativo — lo único que cambia es
+                            cómo se le llama a cada cosa. Ejemplos:
+                            <ul class="mb-0 mt-2">
+                                <li><strong>Universidad/técnico:</strong> Periodo = "Cuatrimestre", Programa = "Carrera"</li>
+                                <li><strong>Preparatoria:</strong> Periodo = "Semestre", Programa = "Bachillerato"</li>
+                                <li><strong>Primaria/Secundaria:</strong> Periodo = "Grado", Programa = "Nivel Educativo"</li>
+                            </ul>
+                        </div>
+
+                        <form action="{{ url_for('configuracion_institucion') }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">Nombre de la Institución</label>
+                                <input type="text" class="form-control" name="nombre_institucion"
+                                       value="{{ config.nombre_institucion }}" placeholder="Ej. Universidad de Enfermería" required>
+                            </div>
+
+                            <div class="row mb-4">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Nombre del periodo (singular)</label>
+                                    <input type="text" class="form-control" name="nombre_periodo_singular"
+                                           value="{{ config.nombre_periodo_singular }}" placeholder="Ej. Cuatrimestre" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Nombre del periodo (plural)</label>
+                                    <input type="text" class="form-control" name="nombre_periodo_plural"
+                                           value="{{ config.nombre_periodo_plural }}" placeholder="Ej. Cuatrimestres" required>
+                                </div>
+                                <small class="text-muted">El bloque numerado en el que se organizan las materias (1°, 2°, 3°...).</small>
+                            </div>
+
+                            <div class="row mb-4">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Nombre del programa (singular)</label>
+                                    <input type="text" class="form-control" name="nombre_programa_singular"
+                                           value="{{ config.nombre_programa_singular }}" placeholder="Ej. Carrera" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Nombre del programa (plural)</label>
+                                    <input type="text" class="form-control" name="nombre_programa_plural"
+                                           value="{{ config.nombre_programa_plural }}" placeholder="Ej. Carreras" required>
+                                </div>
+                                <small class="text-muted">Lo que agrupa varios periodos con sus propias materias.</small>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">Número máximo de periodos</label>
+                                <input type="number" min="1" max="30" class="form-control" style="max-width: 160px;"
+                                       name="max_periodos" value="{{ config.max_periodos }}" required>
+                                <small class="text-muted d-block mt-1">
+                                    Ej. una primaria normalmente necesita 6, una carrera de 3 años con cuatrimestres necesita 9.
+                                </small>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-lg w-100">
+                                <i class="bi bi-check-circle me-1"></i> Guardar Configuración
+                            </button>
+                        </form>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

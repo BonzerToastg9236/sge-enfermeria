@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGE | Dashboard de Cobros</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+    <style>
+        body { background-color: #f4f6f9; }
+        .hero-dash {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a4fb5 100%);
+            color: #fff; padding: 3rem 1rem 4rem 1rem; text-align: center;
+            border-bottom-left-radius: 40px; border-bottom-right-radius: 40px;
+        }
+        .stat-box {
+            border-radius: 14px; padding: 1.25rem; text-align: center;
+            background-color: #fff; border: 2px solid #eef0f4; height: 100%;
+        }
+        .stat-numero { font-size: 1.7rem; font-weight: 800; }
+        .stat-label { font-size: 0.75rem; color: #6b7280; font-weight: 700; text-transform: uppercase; }
+        .card-chart { border: none; border-radius: 18px; box-shadow: 0 0.5rem 1.5rem rgba(0,0,0,0.06); }
+    </style>
+</head>
+<body>
+
+    <div class="hero-dash">
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+            <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
+            {% include '_nav.html' %}
+        </div>
+        <h1 class="fw-bold"><i class="bi bi-bar-chart-fill me-2"></i>Dashboard de Cobros</h1>
+        <p class="mb-0 opacity-75">Resumen de ingresos y adeudos de los últimos 6 meses</p>
+    </div>
+
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+
+                <div class="text-end mb-2 mt-n3">
+                    <a href="{{ url_for('exportar_dashboard_cobros') }}" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel
+                    </a>
+                </div>
+
+                <!-- TARJETAS DE RESUMEN -->
+                <div class="row g-3 mb-4">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-box border-success">
+                            <div class="stat-numero text-success">${{ '%.0f'|format(total_cobrado_mes_actual) }}</div>
+                            <div class="stat-label">Cobrado Este Mes</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-box">
+                            <div class="stat-numero text-primary">${{ '%.0f'|format(total_cobrado_6_meses) }}</div>
+                            <div class="stat-label">Cobrado (6 Meses)</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-box">
+                            <div class="stat-numero text-secondary">${{ '%.0f'|format(total_por_cobrar) }}</div>
+                            <div class="stat-label">Por Cobrar (Saldo Abierto)</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-box border-danger">
+                            <div class="stat-numero text-danger">${{ '%.0f'|format(total_vencido) }}</div>
+                            <div class="stat-label">Vencido</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GRÁFICAS -->
+                <div class="row g-4 mb-4">
+                    <div class="col-lg-7">
+                        <div class="card card-chart p-4">
+                            <h6 class="fw-bold mb-3"><i class="bi bi-graph-up me-1"></i> Ingresos Mensuales</h6>
+                            <canvas id="chartIngresosMensuales" height="220"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="card card-chart p-4">
+                            <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart-fill me-1"></i> Ingresos por Concepto (6 meses)</h6>
+                            {% if ingresos_por_concepto %}
+                                <canvas id="chartPorConcepto" height="220"></canvas>
+                            {% else %}
+                                <p class="text-muted text-center py-5 mb-0">
+                                    <i class="bi bi-inbox display-6 d-block mb-2 opacity-50"></i>
+                                    Todavía no hay pagos registrados en este periodo.
+                                </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const etiquetasMeses = {{ ingresos_mensuales | map(attribute='etiqueta') | list | tojson }};
+        const totalesMeses = {{ ingresos_mensuales | map(attribute='total') | map('float') | list | tojson }};
+
+        new Chart(document.getElementById('chartIngresosMensuales'), {
+            type: 'bar',
+            data: {
+                labels: etiquetasMeses,
+                datasets: [{
+                    label: 'Ingresos ($)',
+                    data: totalesMeses,
+                    backgroundColor: '#0d6efd',
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        {% if ingresos_por_concepto %}
+            const etiquetasConcepto = {{ ingresos_por_concepto | map(attribute='concepto') | list | tojson }};
+            const totalesConcepto = {{ ingresos_por_concepto | map(attribute='total') | map('float') | list | tojson }};
+            const coloresConcepto = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#20c997', '#fd7e14', '#6c757d'];
+
+            new Chart(document.getElementById('chartPorConcepto'), {
+                type: 'doughnut',
+                data: {
+                    labels: etiquetasConcepto,
+                    datasets: [{
+                        data: totalesConcepto,
+                        backgroundColor: coloresConcepto,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
+                }
+            });
+        {% endif %}
+    </script>
+</body>
+</html>

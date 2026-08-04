@@ -146,3 +146,107 @@ def test_folio_de_pago_tiene_el_formato_esperado(client, app):
 
     assert pago.folio is not None
     assert pago.folio.startswith(f'PAGO-{anio_actual}-')
+
+
+def test_directivo_puede_condonar_recargo(client, app):
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    cargo = _crear_cargo_vencido(alumno, dias_vencido=10)
+    _configurar_recargo(TipoRecargo.MONTO_FIJO, '300.00')
+    cargo.actualizar_recargo_si_vencido()
+    db.session.commit()
+    assert cargo.recargo_aplicado == Decimal('300.00')
+
+    crear_usuario()
+    login(client, 'directivo1', 'clave12345')
+
+    client.post(
+        f'/cobro/{cargo.id}/condonar-recargo',
+        data={'nuevo_recargo': '50.00', 'motivo_condonacion': 'Acuerdo con el padre de familia'},
+        follow_redirects=True
+    )
+
+    cargo_actualizado = Cargo.query.get(cargo.id)
+    assert cargo_actualizado.recargo_aplicado == Decimal('50.00')
+    assert cargo_actualizado.recargo_congelado is True
+
+
+def test_recargo_condonado_no_vuelve_a_subir_solo(client, app):
+    """
+    Regresión crítica: antes de agregar recargo_congelado, cada vez que
+    se recalculaba el recargo automático (ej. al abrir /cobros) el
+    recargo condonado se volvía a subir solo, porque
+    actualizar_recargo_si_vencido() nunca deja bajar el recargo. Esta
+    prueba se asegura de que eso ya NO vuelva a pasar.
+    """
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    cargo = _crear_cargo_vencido(alumno, dias_vencido=10)
+    _configurar_recargo(TipoRecargo.MONTO_FIJO, '300.00')
+    cargo.actualizar_recargo_si_vencido()
+    db.session.commit()
+
+    crear_usuario()
+    login(client, 'directivo1', 'clave12345')
+    client.post(
+        f'/cobro/{cargo.id}/condonar-recargo',
+        data={'nuevo_recargo': '0.00', 'motivo_condonacion': 'Condonación total autorizada'},
+        follow_redirects=True
+    )
+
+    # Se vuelve a llamar la recalculación automática, como pasaría cada
+    # vez que alguien abre la pantalla de /cobros de este alumno.
+    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado.actualizar_recargo_si_vencido()
+    db.session.commit()
+
+    assert cargo_actualizado.recargo_aplicado == Decimal('0.00')  # NO debe haber vuelto a subir a $300
+
+
+def test_no_se_puede_aumentar_recargo_via_condonacion(client, app):
+    """La ruta de condonación solo puede REDUCIR, nunca aumentar el recargo."""
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    cargo = _crear_cargo_vencido(alumno, dias_vencido=10)
+    _configurar_recargo(TipoRecargo.MONTO_FIJO, '100.00')
+    cargo.actualizar_recargo_si_vencido()
+    db.session.commit()
+
+    crear_usuario()
+    login(client, 'directivo1', 'clave12345')
+
+    client.post(
+        f'/cobro/{cargo.id}/condonar-recargo',
+        data={'nuevo_recargo': '9999.00', 'motivo_condonacion': 'Intento inválido'},
+        follow_redirects=True
+    )
+
+    cargo_actualizado = Cargo.query.get(cargo.id)
+    assert cargo_actualizado.recargo_aplicado == Decimal('100.00')  # no se movió
+    assert cargo_actualizado.recargo_congelado is False
+
+
+def test_contador_no_puede_condonar_recargo(client, app):
+    """Condonar recargo es exclusivo de Directivo -- ni siquiera Contador puede."""
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    cargo = _crear_cargo_vencido(alumno, dias_vencido=10)
+    _configurar_recargo(TipoRecargo.MONTO_FIJO, '100.00')
+    cargo.actualizar_recargo_si_vencido()
+    db.session.commit()
+
+    crear_usuario(username='contador1', password='clave12345', rol=RolUsuario.CONTADOR)
+    login(client, 'contador1', 'clave12345')
+
+    respuesta = client.post(
+        f'/cobro/{cargo.id}/condonar-recargo',
+        data={'nuevo_recargo': '0.00', 'motivo_condonacion': 'Intento no autorizado'},
+        follow_redirects=True
+    )
+
+    assert respuesta.status_code == 200
+    assert 'permisos'.encode('utf-8') in respuesta.data.lower()
+
+    cargo_actualizado = Cargo.query.get(cargo.id)
+    assert cargo_actualizado.recargo_aplicado == Decimal('100.00')
+

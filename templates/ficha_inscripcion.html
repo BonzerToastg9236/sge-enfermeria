@@ -43,6 +43,10 @@
             border: 1px solid #333;
             display: flex; align-items: center; justify-content: center;
             font-size: 0.7rem; color: #9aa1ab; text-align: center;
+            overflow: hidden;
+        }
+        .foto-box img {
+            width: 100%; height: 100%; object-fit: cover;
         }
 
         .titulo-ficha {
@@ -141,7 +145,13 @@
                             <h5>Universidad de Enfermería</h5>
                             <small>Control Escolar &mdash; Sistema de Gestión Escolar</small>
                         </div>
-                        <div class="foto-box">Fotografía</div>
+                        <div class="foto-box">
+                            {% if foto_alumno %}
+                                <img src="{{ url_for('ver_documento', matricula=alumno.matricula_id, doc_id=foto_alumno.id) }}" alt="Fotografía">
+                            {% else %}
+                                Fotografía
+                            {% endif %}
+                        </div>
                     </div>
 
                     <div class="row g-2 mb-2">
@@ -161,7 +171,7 @@
 
                     <div class="row g-2 mb-3">
                         <div class="col-md-8">
-                            <span class="dato-label">Licenciatura / Carrera</span>
+                            <span class="dato-label">{{ config_institucion.nombre_programa_singular }}</span>
                             <div class="dato-valor">{{ alumno.plan.nombre if alumno.plan else '—' }}</div>
                         </div>
                         <div class="col-md-4">
