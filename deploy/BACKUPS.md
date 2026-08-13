@@ -9,11 +9,24 @@ de recuperarlo. Con documentación física que ya es difícil de conseguir de
 nuevo (como mencionaste), esto no es un "nice to have" — es la diferencia
 entre un inconveniente y una catástrofe real para la escuela.
 
+## Requisito previo: autenticación de PostgreSQL
+
+Antes de que este script pueda correr solo desde cron, PostgreSQL
+necesita poder autenticarte sin pedir contraseña por terminal. Este paso
+ya está cubierto en `DEPLOYMENT.md`, sección 12 (`~/.pgpass`) — si aún
+no lo hiciste, hazlo primero o el cron fallará todas las noches en
+silencio.
+
 ## Qué se respalda y cómo
 
 `deploy/backup.sh` hace 2 cosas cada vez que corre:
 
-1. **`pg_dump`** de toda la base de datos PostgreSQL, comprimido con gzip.
+1. **`pg_dump --clean --if-exists`** de toda la base de datos PostgreSQL,
+   comprimido con gzip. Las banderas `--clean --if-exists` hacen que el
+   dump incluya las instrucciones para borrar cada tabla antes de
+   recrearla — esto es lo que permite que `restore.sh` pueda restaurar
+   limpio sobre una base que ya tiene datos, en vez de que la
+   restauración choque con "la tabla ya existe" a medio proceso.
 2. **`tar`** de toda la carpeta `instance/documentos_alumnos/` (los documentos subidos -- esta carpeta vive fuera de `static/` a propósito, porque `static/` se sirve públicamente sin login).
 
 Ambos se guardan con fecha y hora en el nombre, así que cada corrida deja
@@ -124,6 +137,13 @@ chmod +x deploy/restore.sh   # si no lo hiciste ya
 Te va a pedir confirmación explícita (escribir "si") antes de sobreescribir
 nada, precisamente porque es una operación destructiva sobre lo que esté
 en producción en ese momento.
+
+El script valida que el archivo de documentos no esté corrupto **antes**
+de tocar nada — si el `.tar.gz` viene dañado, se detiene sin borrar tus
+documentos actuales. Y si todo sale bien, tu carpeta anterior de
+documentos no se borra de inmediato: queda renombrada como
+`documentos_alumnos.bak` por si necesitas compararla, y puedes borrarla
+tú mismo una vez que confirmes que todo se ve bien.
 
 ## Prueba tu restauración de vez en cuando — en serio
 

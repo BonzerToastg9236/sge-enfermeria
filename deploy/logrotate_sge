@@ -1,0 +1,78 @@
+# /etc/logrotate.d/sge
+#
+# Rotación de los logs de Gunicorn del Sistema de Gestión Escolar.
+#
+# POR QUÉ ESTE ARCHIVO EXISTE [D9 de la auditoría]:
+# app.py ya rota su propio log (logs/sge.log) con RotatingFileHandler de
+# Python, pero eso NO cubre los logs que escribe Gunicorn, definidos en
+# deploy/sge.service:
+#     --access-logfile /home/sge/sge_enfermeria/logs/access.log
+#     --error-logfile  /home/sge/sge_enfermeria/logs/error.log
+# Esos dos crecen sin límite. access.log es el que más rápido crece
+# (una línea por CADA petición: cada página, cada imagen, cada clic).
+#
+# En el VPS de 25 GB que recomienda DEPLOYMENT.md, un access.log sin
+# rotar termina llenando el disco. Y un disco lleno no solo tumba la
+# aplicación: también tumba PostgreSQL y hace que los respaldos dejen
+# de correr, todo al mismo tiempo.
+#
+# INSTALACIÓN (una sola vez, en el VPS):
+#     sudo cp ~/sge_enfermeria/deploy/logrotate_sge /etc/logrotate.d/sge
+#     sudo chown root:root /etc/logrotate.d/sge
+#     sudo chmod 644 /etc/logrotate.d/sge
+#
+# PROBAR que quedó bien escrito (sin aplicar nada todavía):
+#     sudo logrotate -d /etc/logrotate.d/sge
+#
+# FORZAR una rotación ahora, para comprobar que funciona de verdad:
+#     sudo logrotate -f /etc/logrotate.d/sge
+#     ls -lh ~/sge_enfermeria/logs/
+#
+# Una vez instalado, el propio cron diario de logrotate (que Ubuntu ya
+# trae configurado) se encarga solo. No hay que agendar nada.
+
+/home/sge/sge_enfermeria/logs/*.log {
+    # Rota una vez al día...
+    daily
+
+    # ...o antes, si el archivo ya pasó de 20 MB (lo que ocurra primero).
+    # Esto protege contra un pico de tráfico o un error en bucle que
+    # llene el disco en cuestión de horas, sin esperar al corte diario.
+    maxsize 20M
+
+    # Conserva 14 archivos rotados. Con la compresión de abajo, esto
+    # ocupa muy poco y da dos semanas de historial para investigar
+    # cualquier incidente que Control Escolar reporte tarde.
+    rotate 14
+
+    # Comprime los rotados (access.log comprime muchísimo: es texto
+    # muy repetitivo).
+    compress
+
+    # No comprimas el más reciente todavía: si algo está fallando AHORA
+    # mismo, quieres poder leerlo directo con tail/grep sin descomprimir.
+    delaycompress
+
+    # Si un log no existe (ej. sge.log antes del primer error en
+    # producción), no marcar error.
+    missingok
+
+    # Si el archivo está vacío, no tiene caso rotarlo.
+    notifempty
+
+    # Dueño y permisos del archivo nuevo que se crea tras rotar.
+    # Debe coincidir con el User/Group de deploy/sge.service (sge:www-data),
+    # o Gunicorn perdería el permiso de escribir en su propio log.
+    create 0640 sge www-data
+
+    # Gunicorn mantiene el archivo ABIERTO mientras corre. Si logrotate
+    # simplemente lo renombra, Gunicorn sigue escribiendo en el archivo
+    # viejo (ya renombrado) y el nuevo se queda vacío para siempre --
+    # un modo de falla silencioso y muy común.
+    #
+    # copytruncate evita eso: copia el contenido y luego vacía el archivo
+    # original en su lugar, sin cerrarlo. Se usa aquí en vez de mandarle
+    # una señal a Gunicorn porque no requiere permisos extra ni reiniciar
+    # workers (que cortaría peticiones en curso).
+    copytruncate
+}

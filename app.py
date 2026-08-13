@@ -18,8 +18,10 @@ Reglas de negocio implementadas a nivel de modelo:
 
 import enum
 import io
+import logging
 import os
 import re
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone, timedelta, date
 
 
@@ -257,7 +259,9 @@ class Materia(db.Model):
     id_plan_fk = db.Column(
         db.Integer,
         db.ForeignKey('planes_estudio.id'),
-        nullable=False
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): filtrado constantemente vía
+                    # Materia.query.filter_by(id_plan_fk=...) -- "Escudo del Plan"
     )
 
     # Relaciones
@@ -294,7 +298,9 @@ class Alumno(db.Model):
     id_plan_fk = db.Column(
         db.Integer,
         db.ForeignKey('planes_estudio.id'),
-        nullable=False
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): se filtra por carrera/plan en
+                    # reportes y listados constantemente
     )
 
     estatus = db.Column(
@@ -458,12 +464,14 @@ class Calificacion(db.Model):
     matricula_fk = db.Column(
         db.String(20),
         db.ForeignKey('alumnos.matricula_id'),
-        nullable=False
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): filtrado constante para boleta/historial del alumno
     )
     id_materia_fk = db.Column(
         db.Integer,
         db.ForeignKey('materias.id'),
-        nullable=False
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): filtrado para reportes por materia
     )
 
     calificacion_final = db.Column(db.Float, nullable=False)
@@ -568,8 +576,18 @@ class InscripcionMateria(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    matricula_fk = db.Column(db.String(20), db.ForeignKey('alumnos.matricula_id'), nullable=False)
-    id_materia_fk = db.Column(db.Integer, db.ForeignKey('materias.id'), nullable=False)
+    matricula_fk = db.Column(
+        db.String(20),
+        db.ForeignKey('alumnos.matricula_id'),
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): carga académica se consulta por alumno constantemente
+    )
+    id_materia_fk = db.Column(
+        db.Integer,
+        db.ForeignKey('materias.id'),
+        nullable=False,
+        index=True
+    )
     periodo_escolar = db.Column(db.String(20), nullable=False)
 
     grupo = db.Column(db.String(20), nullable=True)
@@ -795,7 +813,12 @@ class Cargo(db.Model):
     __tablename__ = 'cargos'
 
     id = db.Column(db.Integer, primary_key=True)
-    matricula_fk = db.Column(db.String(20), db.ForeignKey('alumnos.matricula_id'), nullable=False)
+    matricula_fk = db.Column(
+        db.String(20),
+        db.ForeignKey('alumnos.matricula_id'),
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): estado de cuenta / cobros se consultan por matrícula constantemente
+    )
 
     concepto_cobro_fk = db.Column(db.Integer, db.ForeignKey('conceptos_cobro.id'), nullable=True)
     concepto = db.Column(db.String(150), nullable=False)  # Denormalizado: nombre del concepto al momento de crear el cargo
@@ -803,9 +826,9 @@ class Cargo(db.Model):
     recargo_aplicado = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal('0.00'))
     recargo_congelado = db.Column(db.Boolean, nullable=False, default=False)  # True = Dirección lo condonó/ajustó a mano; ya no se recalcula solo
     periodo_escolar = db.Column(db.String(20), nullable=True)
-    fecha_vencimiento = db.Column(db.Date, nullable=True)
+    fecha_vencimiento = db.Column(db.Date, nullable=True, index=True)  # PERFORMANCE-NOTE (H4): filtrado en cartera vencida/dashboard
     fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
-    estatus = db.Column(db.Enum(EstatusCargo), default=EstatusCargo.PENDIENTE, nullable=False)
+    estatus = db.Column(db.Enum(EstatusCargo), default=EstatusCargo.PENDIENTE, nullable=False, index=True)  # PERFORMANCE-NOTE (H4): filtrado en casi todos los reportes de cobros
     comentario = db.Column(db.String(255), nullable=True)  # Ej. motivo de cancelación
 
     generado_por_fk = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True)
@@ -844,7 +867,7 @@ class Cargo(db.Model):
             and self.fecha_vencimiento < ahora_utc().date()
         )
 
-    def actualizar_recargo_si_vencido(self):
+    def actualizar_recargo_si_vencido(self, config=None):
         """
         Recalcula el recargo con la configuración VIGENTE (auto-ajustable:
         si Dirección cambia la fórmula, aplica de inmediato a partir de
@@ -853,6 +876,13 @@ class Cargo(db.Model):
         recargos que ya se hicieron oficiales en algún reporte previo.
         Se llama cada vez que se listan los cargos de un alumno (sin
         necesidad de un cron job en segundo plano).
+
+        PERFORMANCE-NOTE: acepta un `config` ya cargado (ConfiguracionCobros)
+        para quien esté procesando muchos cargos en un loop (ej. reportes de
+        cartera vencida / dashboard) -- así se evita que cada cargo dispare
+        su propia llamada a ConfiguracionCobros.obtener(), que es siempre
+        la misma fila. Si no se pasa, se comporta igual que antes (una
+        sola llamada, para el caso normal de un solo cargo).
         """
         if self.estatus in (EstatusCargo.PAGADO, EstatusCargo.CANCELADO):
             return
@@ -861,7 +891,8 @@ class Cargo(db.Model):
         if self.recargo_congelado:
             return  # Dirección ya ajustó este recargo a mano -- no se recalcula solo
 
-        config = ConfiguracionCobros.obtener()
+        if config is None:
+            config = ConfiguracionCobros.obtener()
         hoy = ahora_utc().date()
         dias_de_atraso = (hoy - self.fecha_vencimiento).days - config.dias_gracia
 
@@ -897,11 +928,16 @@ class Pago(db.Model):
     __tablename__ = 'pagos'
 
     id = db.Column(db.Integer, primary_key=True)
-    cargo_fk = db.Column(db.Integer, db.ForeignKey('cargos.id'), nullable=False)
+    cargo_fk = db.Column(
+        db.Integer,
+        db.ForeignKey('cargos.id'),
+        nullable=False,
+        index=True  # PERFORMANCE-NOTE (H4): base de la agregación de saldo por cargo (ver _matriculas_con_adeudo / _calcular_cartera_vencida)
+    )
 
     folio = db.Column(db.String(30), unique=True, nullable=True)  # Ej. "PAGO-2026-000042"
     monto_pagado = db.Column(db.Numeric(10, 2), nullable=False)
-    fecha_pago = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_pago = db.Column(db.DateTime, default=datetime.utcnow, index=True)  # PERFORMANCE-NOTE (H4): reportes diarios y dashboard filtran por rango de fecha
     metodo_pago = db.Column(db.Enum(MetodoPago), nullable=False, default=MetodoPago.EFECTIVO)
     referencia = db.Column(db.String(100), nullable=True)  # Folio/número de referencia bancaria
     comentario = db.Column(db.String(255), nullable=True)
@@ -1059,6 +1095,48 @@ def create_app(config_name='development'):
     # Asegura que exista la carpeta física donde se guardan los documentos
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+    # -----------------------------------------------------------------
+    # LOGGING (H5)
+    # -----------------------------------------------------------------
+    # Antes de esto, un error en producción solo aparecía como un 500
+    # genérico en el navegador del usuario, sin ningún rastro guardado en
+    # el servidor -- imposible saber qué pasó después del hecho. Gunicorn
+    # ya escribe su propio log de acceso/errores (ver deploy/sge.service),
+    # pero eso NO captura excepciones de la lógica de la app con
+    # traceback completo, que es lo que realmente hace falta para
+    # diagnosticar un error reportado por Control Escolar.
+    if not app.testing:
+        if config_name == 'production':
+            # Carpeta ya creada manualmente en el paso 7 de DEPLOYMENT.md
+            # (mkdir -p ~/sge_enfermeria/logs). RotatingFileHandler evita
+            # que el log crezca sin límite y llene el disco del VPS con
+            # el tiempo (relacionado con D9 de la auditoría): guarda hasta
+            # 5 archivos de 2 MB cada uno (10 MB totales), rotando el más
+            # viejo cuando se llena.
+            log_dir = os.path.join(app.instance_path, '..', 'logs')
+            log_dir = os.path.abspath(log_dir)
+            os.makedirs(log_dir, exist_ok=True)
+            handler = RotatingFileHandler(
+                os.path.join(log_dir, 'sge.log'),
+                maxBytes=2 * 1024 * 1024,
+                backupCount=5,
+                encoding='utf-8',
+            )
+            handler.setLevel(logging.INFO)
+        else:
+            # Desarrollo: a consola, nada de archivos que limpiar a mano.
+            handler = logging.StreamHandler()
+            handler.setLevel(logging.DEBUG)
+
+        handler.setFormatter(logging.Formatter(
+            '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+        ))
+        app.logger.handlers.clear()   # quita el handler por defecto de Flask
+        app.logger.addHandler(handler)
+        app.logger.propagate = False  # evita que el registro suba también al logger raíz
+        app.logger.setLevel(logging.INFO if config_name == 'production' else logging.DEBUG)
+        app.logger.info('SGE arrancado (config=%s)', config_name)
+
     # Aquí se registrarán los Blueprints en pasos posteriores:
     # from routes.registro import registro_bp
     # from routes.admin import admin_bp
@@ -1080,6 +1158,39 @@ def limite_intentos_excedido(error):
     """
     flash('Demasiados intentos de inicio de sesión. Por seguridad, espera un minuto e inténtalo de nuevo.', 'danger')
     return redirect(url_for('login'))
+
+
+@app.errorhandler(404)
+def pagina_no_encontrada(error):
+    """
+    H5: antes de esto, una URL mal escrita o un enlace roto mostraba la
+    página de error genérica de Flask/Werkzeug (con detalle técnico si
+    DEBUG está activo, o una pantalla en blanco poco amigable si no).
+    """
+    return render_template('errores/404.html'), 404
+
+
+@app.errorhandler(403)
+def acceso_prohibido(error):
+    """
+    H5: se dispara, por ejemplo, cuando @rol_requerido bloquea a un
+    usuario autenticado pero sin el rol necesario para esa pantalla.
+    """
+    return render_template('errores/403.html'), 403
+
+
+@app.errorhandler(500)
+def error_interno(error):
+    """
+    H5: registra el traceback completo en el log del servidor (ver
+    configuración de logging en create_app) ANTES de mostrarle al usuario
+    una pantalla genérica sin detalle técnico -- Control Escolar nunca
+    debe ver un traceback de Python, pero Dirección/soporte técnico sí
+    necesita poder diagnosticar qué pasó revisando logs/sge.log.
+    """
+    app.logger.exception('Error interno no manejado: %s', error)
+    db.session.rollback()  # por si el error dejó la sesión de SQLAlchemy en un estado inconsistente
+    return render_template('errores/500.html'), 500
 
 
 @login_manager.user_loader
@@ -3100,28 +3211,68 @@ def exportar_reporte_cobros_del_dia():
 
 
 def _calcular_cartera_vencida():
-    """Extraída de cartera_vencida() para reutilizar en la exportación a Excel."""
+    """
+    Extraída de cartera_vencida() para reutilizar en la exportación a Excel.
+
+    PERFORMANCE-NOTE: la versión anterior hacía Cargo.query...all() y luego,
+    por cada cargo candidato, llamaba esta_vencido() / actualizar_recargo_si_vencido()
+    / saldo_pendiente() -- cada una de esas dispara cargo.pagos (lazy='select'
+    en la relación Cargo.pagos, ver clase Pago), y actualizar_recargo_si_vencido()
+    además llamaba ConfiguracionCobros.obtener() en CADA iteración, repitiendo
+    la misma consulta de una tabla de una sola fila. Con miles de cargos
+    vencidos (justo el escenario de este reporte: "cartera vencida" tiende a
+    crecer con el tiempo), esto son miles de consultas extra en una sola
+    carga de página.
+
+    Esta versión:
+      1. Trae la config UNA sola vez, antes del loop.
+      2. Calcula el total pagado de todos los cargos candidatos con UNA
+         agregación SQL (mismo patrón que _matriculas_con_adeudo), en vez
+         de que cada cargo dispare su propia consulta a Pago.
+    """
+    hoy = ahora_utc().date()
+    config = ConfiguracionCobros.obtener()  # una sola vez, no una vez por cargo
+
     candidatos = (
         Cargo.query
         .filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL]))
         .filter(Cargo.fecha_vencimiento.isnot(None))
+        .filter(Cargo.fecha_vencimiento < hoy)  # ya filtra "vencido" en SQL, no solo en Python
         .all()
     )
 
-    hoy = ahora_utc().date()
+    if not candidatos:
+        return [], Decimal('0.00')
+
+    cargo_ids = [c.id for c in candidatos]
+    pagos_por_cargo = dict(
+        db.session.query(
+            Pago.cargo_fk,
+            func.coalesce(func.sum(Pago.monto_pagado), 0)
+        )
+        .filter(Pago.cargo_fk.in_(cargo_ids))
+        .filter(Pago.anulado.is_(False))
+        .group_by(Pago.cargo_fk)
+        .all()
+    )
+
     filas = []
     for cargo in candidatos:
-        if not cargo.esta_vencido():
-            continue
-        cargo.actualizar_recargo_si_vencido()
+        # esta_vencido() ya no hace falta re-evaluarlo: el filtro SQL de
+        # arriba (fecha_vencimiento < hoy) más el filtro de estatus ya
+        # garantizan que todo lo que llega aquí está vencido.
+        cargo.actualizar_recargo_si_vencido(config=config)
+        total_pagado = pagos_por_cargo.get(cargo.id, Decimal('0.00'))
+        saldo = (cargo.monto + cargo.recargo_aplicado) - total_pagado
         filas.append({
             'cargo': cargo,
             'dias_atraso': (hoy - cargo.fecha_vencimiento).days,
+            'saldo': saldo,
         })
     db.session.commit()  # persiste cualquier recargo que se haya actualizado arriba
 
-    filas.sort(key=lambda f: f['cargo'].saldo_pendiente(), reverse=True)
-    total_vencido = sum((f['cargo'].saldo_pendiente() for f in filas), Decimal('0.00'))
+    filas.sort(key=lambda f: f['saldo'], reverse=True)
+    total_vencido = sum((f['saldo'] for f in filas), Decimal('0.00'))
 
     return filas, total_vencido
 
@@ -3167,7 +3318,7 @@ def exportar_cartera_vencida():
             cargo.concepto,
             cargo.periodo_escolar or '—',
             fila['dias_atraso'],
-            float(cargo.saldo_pendiente()),
+            float(fila['saldo']),
         ])
 
     ws.append([])
@@ -3244,18 +3395,46 @@ def _calcular_dashboard_cobros():
 
     # Reutiliza el mismo recálculo que Cobros y Cartera Vencida -- nunca
     # se confía en un recargo_aplicado guardado sin refrescar primero.
+    #
+    # PERFORMANCE-NOTE: mismo patrón N+1 que tenía _calcular_cartera_vencida
+    # (ver esa función) -- este dashboard es la pantalla que más seguido se
+    # va a abrir, así que se arregla igual: config cargada una sola vez, y
+    # el saldo de todos los cargos abiertos calculado con UNA agregación
+    # SQL en vez de que cada cargo dispare su propia consulta a Pago.
+    hoy = ahora_utc().date()
+    config = ConfiguracionCobros.obtener()
     cargos_abiertos = Cargo.query.filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL])).all()
     hubo_cambios = False
     for cargo in cargos_abiertos:
         antes = cargo.recargo_aplicado
-        cargo.actualizar_recargo_si_vencido()
+        cargo.actualizar_recargo_si_vencido(config=config)
         if cargo.recargo_aplicado != antes:
             hubo_cambios = True
     if hubo_cambios:
         db.session.commit()
 
-    total_por_cobrar = sum((c.saldo_pendiente() for c in cargos_abiertos), Decimal('0.00'))
-    total_vencido = sum((c.saldo_pendiente() for c in cargos_abiertos if c.esta_vencido()), Decimal('0.00'))
+    if cargos_abiertos:
+        cargo_ids = [c.id for c in cargos_abiertos]
+        pagos_por_cargo = dict(
+            db.session.query(
+                Pago.cargo_fk,
+                func.coalesce(func.sum(Pago.monto_pagado), 0)
+            )
+            .filter(Pago.cargo_fk.in_(cargo_ids))
+            .filter(Pago.anulado.is_(False))
+            .group_by(Pago.cargo_fk)
+            .all()
+        )
+    else:
+        pagos_por_cargo = {}
+
+    total_por_cobrar = Decimal('0.00')
+    total_vencido = Decimal('0.00')
+    for cargo in cargos_abiertos:
+        saldo = (cargo.monto + cargo.recargo_aplicado) - pagos_por_cargo.get(cargo.id, Decimal('0.00'))
+        total_por_cobrar += saldo
+        if cargo.fecha_vencimiento is not None and cargo.fecha_vencimiento < hoy:
+            total_vencido += saldo
 
     return {
         'ingresos_mensuales': ingresos_mensuales,
@@ -3545,6 +3724,14 @@ def planes_mensualidades():
 
         if not plan:
             flash('Plan de estudios no encontrado.', 'danger')
+        elif not monto_raw:
+            # Campo vacío = "No definido" a propósito (así lo indica el
+            # placeholder del formulario). Antes esto siempre fallaba la
+            # validación de Decimal('') y nunca se podía volver a dejar sin
+            # definir una mensualidad ya configurada.
+            plan.monto_mensualidad = None
+            db.session.commit()
+            flash(f'Mensualidad de "{plan.nombre}" eliminada (queda sin definir).', 'success')
         else:
             try:
                 monto = Decimal(monto_raw)

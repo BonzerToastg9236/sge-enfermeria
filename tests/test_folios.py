@@ -18,7 +18,7 @@ conexiones simultáneas), no solo contra SQLite.
 """
 from app import ContadorFolio, siguiente_folio, Calificacion, db as _db
 
-from conftest import crear_plan, crear_materia, crear_alumno, crear_usuario
+from tests.conftest import crear_plan, crear_materia, crear_alumno, crear_usuario
 
 
 def test_siguiente_folio_es_consecutivo(app):

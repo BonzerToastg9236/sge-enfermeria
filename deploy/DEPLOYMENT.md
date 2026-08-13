@@ -67,10 +67,38 @@ Dentro de la consola de PostgreSQL:
 CREATE DATABASE sge_produccion;
 CREATE USER sge_user WITH PASSWORD 'ELIGE_UNA_CONTRASEÑA_FUERTE_AQUI';
 GRANT ALL PRIVILEGES ON DATABASE sge_produccion TO sge_user;
+
+-- IMPORTANTE (PostgreSQL 15 y superior, que es lo que trae Ubuntu 24.04
+-- de fábrica): desde la versión 15, el owner de una base de datos YA NO
+-- tiene automáticamente permiso para crear tablas dentro del esquema
+-- "public". Sin este GRANT adicional, "flask db upgrade" en el paso 6
+-- falla con el error "permission denied for schema public".
+\c sge_produccion
+GRANT ALL ON SCHEMA public TO sge_user;
+ALTER DATABASE sge_produccion OWNER TO sge_user;
 \q
 ```
 
 Guarda esa contraseña — la vas a necesitar en el `.env` del paso 5.
+
+> ⚠️ **Sobre la contraseña que elijas (D5):** usa solo letras y números.
+> El archivo `.env` se carga en producción vía `EnvironmentFile=` en
+> `sge.service`, y **systemd no interpreta `.env` igual que una terminal
+> bash** — no procesa comillas, y trata `#` como inicio de un comentario
+> (cortando todo lo que sigue). Si tu contraseña incluye `#`, `@`, `/`,
+> `:` u otros caracteres especiales, `DATABASE_URL` puede llegar truncada
+> a Gunicorn y la app fallará al conectar con un error confuso que no
+> menciona la contraseña para nada. Genera una así de fácil:
+>
+> ```bash
+> python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+> ```
+>
+> Esto genera solo letras, números, `-` y `_` — segura y sin riesgo de
+> romper `EnvironmentFile`. Si prefieres usar caracteres especiales de
+> todos modos, tendrás que URL-encodearlos dentro de `DATABASE_URL`
+> (por ejemplo `@` se escribe `%40`), pero es innecesariamente frágil;
+> mejor evitarlo.
 
 ---
 
@@ -243,7 +271,44 @@ configuración.
 - [ ] HTTPS activo (candado en el navegador, sin advertencias)
 - [ ] Cuenta Directivo creada con contraseña fuerte (no la misma de prueba)
 - [ ] `ufw status` muestra el firewall activo
+- [ ] `~/.pgpass` configurado con permiso `600` (paso 12) — si no, el respaldo automático nunca corre
 - [ ] Respaldos automáticos configurados y probados — ver `deploy/BACKUPS.md`
+
+---
+
+## 12. Autenticación de PostgreSQL para el respaldo automático (obligatorio)
+
+`deploy/backup.sh` corre `pg_dump` desde una tarea de cron, y **cron no
+tiene terminal** para que alguien teclee la contraseña de PostgreSQL
+manualmente. Sin este paso, el respaldo automático falla todas las
+noches en silencio (el error solo queda en `backup.log`), y no te
+enteras hasta el día que de verdad necesites restaurar algo y no haya
+nada que restaurar.
+
+Como el usuario `sge` (el mismo que corre la app, NO root):
+
+```bash
+touch ~/.pgpass
+chmod 600 ~/.pgpass
+```
+
+Edita `~/.pgpass` y agrega esta línea, con tu contraseña real de
+`sge_user` (la misma del paso 3):
+
+```
+localhost:5432:sge_produccion:sge_user:TU_CONTRASEÑA_REAL_AQUI
+```
+
+El permiso `600` es obligatorio — PostgreSQL se niega a leer este
+archivo si otros usuarios pueden verlo. Prueba que funcione sin pedir
+contraseña:
+
+```bash
+pg_dump -U sge_user -h localhost sge_produccion > /dev/null && echo "OK: pg_dump no pidió contraseña"
+```
+
+Si no te pidió contraseña y no dio error, ya quedó listo para que
+`backup.sh` corra solo desde cron.
 
 ---
 

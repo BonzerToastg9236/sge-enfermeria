@@ -13,3 +13,4 @@ gunicorn==22.0.0
 # porque solo se necesita en el VPS de producción. En desarrollo local usamos
 # SQLite y no requiere ningún driver adicional. Instálalo solo si vas a
 # conectarte a PostgreSQL:  pip install -r requirements-prod.txt
+Flask-Mail==0.10.0

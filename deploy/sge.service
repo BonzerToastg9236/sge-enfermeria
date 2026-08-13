@@ -37,5 +37,119 @@ ExecStart=/home/sge/sge_enfermeria/venv/bin/gunicorn \
 Restart=on-failure
 RestartSec=5
 
+# ============================================================
+# ENDURECIMIENTO DE SEGURIDAD [D8 de la auditoría]
+# ============================================================
+# Esto NO corrige ninguna vulnerabilidad conocida del SGE. Lo que hace
+# es limitar el DAÑO si alguna vez se explotara una: aunque alguien
+# lograra ejecutar código dentro del proceso de Gunicorn, no podría
+# tocar el resto del sistema.
+#
+# Es "defensa en profundidad": la capa que asume que las capas
+# anteriores pueden fallar.
+#
+# ⚠️ SI EL SERVICIO NO ARRANCA después de agregar esto, la causa casi
+#    siempre es ProtectSystem/ReadWritePaths. Ver el diagnóstico al
+#    final de este archivo antes de quitar líneas al azar.
+
+# El proceso no puede ganar más privilegios de los que ya tiene, ni
+# siquiera vía binarios setuid. Es la línea más barata y segura de
+# todas: no rompe nada y cierra toda una familia de escaladas.
+NoNewPrivileges=true
+
+# /tmp propio y aislado. Si el proceso escribe algo temporal, ningún
+# otro usuario del servidor lo ve, y se borra al reiniciar el servicio.
+PrivateTmp=true
+
+# Sin acceso a dispositivos físicos (/dev/sda, etc.). Una app web no
+# tiene ninguna razón legítima para tocarlos.
+PrivateDevices=true
+
+# Todo el sistema de archivos queda de SOLO LECTURA para este proceso,
+# salvo lo que se liste abajo en ReadWritePaths.
+ProtectSystem=strict
+
+# Rutas donde Gunicorn/Flask SÍ necesitan escribir. Si falta alguna,
+# el servicio arranca pero falla al operar:
+#   - instance/documentos_alumnos/ : documentos que sube Control Escolar
+#   - instance/                    : base de datos SQLite si se usara
+#   - logs/                        : access.log, error.log, sge.log
+#   - el propio directorio         : ahí se crea el socket sge.sock
+ReadWritePaths=/home/sge/sge_enfermeria
+
+# ⚠️ NO agregar "ProtectHome=true" ni "ProtectHome=read-only".
+#    Parece lo lógico ("proteger /home"), pero el proyecto VIVE en
+#    /home/sge/sge_enfermeria: activarlo ocultaría la aplicación de sí
+#    misma y el servicio no arrancaría (o no podría escribir nada).
+#    Esta línea existe para documentar la decisión, no por descuido.
+ProtectHome=false
+
+# El proceso no puede modificar parámetros del kernel ni cargar módulos.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+
+# No puede cambiar el reloj ni el nombre del host del servidor.
+ProtectClock=true
+ProtectHostname=true
+
+# Solo los tipos de conexión que la app realmente usa:
+#   AF_UNIX  -> el socket sge.sock con el que habla Nginx
+#   AF_INET  -> PostgreSQL, Redis y el envío de correo (SMTP de Gmail)
+#   AF_INET6 -> lo mismo, en redes IPv6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# No puede crear namespaces (bloque básico para evitar escapes de
+# contenedor / manipulación de aislamiento).
+RestrictNamespaces=true
+
+# No puede adquirir capacidades de root aunque estuvieran disponibles.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Bloquea llamadas al sistema que una app web nunca necesita
+# (depuración de otros procesos, módulos del kernel, relojes, etc.).
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @debug @module @clock
+
+# Archivos nuevos que cree la app: legibles por el grupo (www-data,
+# que necesita Nginx para el socket), nunca por el resto del mundo.
+# Importante para los documentos escaneados de los alumnos.
+UMask=0027
+
+# NOTA sobre MemoryDenyWriteExecute: se dejó FUERA a propósito. Es una
+# buena protección en general, pero rompe algunas extensiones de C de
+# Python que generan código en memoria, y el fallo se manifiesta de
+# forma confusa en tiempo de ejecución (no al arrancar). No vale la
+# pena el riesgo aquí.
+
 [Install]
 WantedBy=multi-user.target
+
+# ============================================================
+# CÓMO APLICAR Y VERIFICAR
+# ============================================================
+#   sudo cp ~/sge_enfermeria/deploy/sge.service /etc/systemd/system/sge.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart sge
+#   sudo systemctl status sge          # debe decir: active (running)
+#
+# Comprobar que la app responde de verdad (no solo que el proceso vive):
+#   curl -I http://localhost            # a través de Nginx
+#
+# Ver qué tan endurecido quedó el servicio (systemd le pone calificación):
+#   systemd-analyze security sge.service
+#
+# SI NO ARRANCA -- diagnóstico en orden:
+#   sudo journalctl -u sge -n 50 --no-pager
+#
+#   • "Read-only file system"  -> falta una ruta en ReadWritePaths
+#   • "Permission denied" en el .sock -> revisa que Group=www-data y
+#     que el directorio de la app esté en ReadWritePaths
+#   • No arranca y no dice nada claro -> comenta TEMPORALMENTE
+#     ProtectSystem y SystemCallFilter, confirma que arranca, y
+#     vuelve a activarlos de uno en uno para aislar cuál fue.
+#
+# El resto de las directivas (NoNewPrivileges, PrivateTmp, Protect*)
+# prácticamente nunca causan problemas en una app Flask normal.

@@ -7,3 +7,10 @@ instance/
 .vscode/
 *.log
 static/uploads/
+
+# --- Agregado tras la auditoría ---
+.pytest_cache/
+.coverage
+logs/
+backups/
+*.sql.gz

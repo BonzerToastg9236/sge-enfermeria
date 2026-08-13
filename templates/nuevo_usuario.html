@@ -74,9 +74,17 @@
                             <div class="mb-3">
                                 <label for="rol" class="form-label fw-semibold">Rol</label>
                                 <select class="form-select" id="rol" name="rol" required>
-                                    <option value="ADMINISTRATIVO" selected>Administrativo (consulta y actualiza)</option>
+                                    <option value="ADMINISTRATIVO" selected>Administrativo (Alumnos + Cobros)</option>
                                     <option value="DIRECTIVO">Directivo (control total)</option>
+                                    <option value="CONTADOR">Contador (solo área de Cobros)</option>
+                                    <option value="CAPTURADOR">Capturador (solo administración del alumno)</option>
                                 </select>
+                                <small class="text-muted d-block mt-2">
+                                    <strong>Directivo:</strong> control total. &middot;
+                                    <strong>Administrativo:</strong> alumnos + cobros. &middot;
+                                    <strong>Contador:</strong> solo cobros. &middot;
+                                    <strong>Capturador:</strong> solo administración académica del alumno.
+                                </small>
                             </div>
 
                             <div class="row g-3 mb-3">

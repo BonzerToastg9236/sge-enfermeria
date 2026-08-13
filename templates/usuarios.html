@@ -75,10 +75,14 @@
                                             <td>{{ u.nombre_completo }}</td>
                                             <td><code>{{ u.username }}</code></td>
                                             <td>
-                                                {% if u.es_directivo() %}
+                                                {% if u.rol.name == 'DIRECTIVO' %}
                                                     <span class="badge bg-primary">Directivo</span>
-                                                {% else %}
+                                                {% elif u.rol.name == 'ADMINISTRATIVO' %}
                                                     <span class="badge bg-secondary">Administrativo</span>
+                                                {% elif u.rol.name == 'CONTADOR' %}
+                                                    <span class="badge bg-success">Contador</span>
+                                                {% elif u.rol.name == 'CAPTURADOR' %}
+                                                    <span class="badge bg-info text-dark">Capturador</span>
                                                 {% endif %}
                                             </td>
                                             <td>

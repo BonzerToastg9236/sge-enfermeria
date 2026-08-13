@@ -86,7 +86,13 @@
                                                 <td class="text-center">
                                                     <span class="badge bg-danger dias-badge">{{ fila.dias_atraso }} día(s)</span>
                                                 </td>
-                                                <td class="text-end fw-bold text-danger">${{ '%.2f'|format(cargo.saldo_pendiente()) }}</td>
+                                                {# PERFORMANCE-NOTE (H2): usar fila.saldo, NO cargo.saldo_pendiente().
+                                                   saldo_pendiente() recorre cargo.pagos, que es lazy='select':
+                                                   llamarlo aquí dispara una consulta extra POR CADA FILA durante
+                                                   el render, deshaciendo justo la optimización que ya hizo
+                                                   _calcular_cartera_vencida() en app.py (una sola agregación SQL
+                                                   para todos los cargos). El valor ya viene calculado en fila.saldo. #}
+                                                <td class="text-end fw-bold text-danger">${{ '%.2f'|format(fila.saldo) }}</td>
                                                 <td class="text-end">
                                                     <a href="{{ url_for('cobros', matricula=cargo.matricula_fk) }}" class="btn btn-sm btn-outline-primary">
                                                         <i class="bi bi-cash-coin me-1"></i>Cobrar
