@@ -1474,6 +1474,48 @@ def _max_periodos() -> int:
     return ConfiguracionInstitucion.obtener().max_periodos
 
 
+# --- Paginación -------------------------------------------------------------
+# PERFORMANCE-NOTE: con ~800 alumnos, el filtro "Activos" del buscador
+# generaba una página de MÁS DE 1 MB de HTML (una tarjeta Bootstrap por
+# cada alumno). El servidor la armaba rápido (~50ms gracias a los índices
+# de H4), pero el navegador tiene que descargar y pintar ese megabyte:
+# en una laptop modesta o por WiFi de la escuela, eso sí se siente.
+# El cuello de botella no era SQL, era el tamaño de la respuesta.
+ALUMNOS_POR_PAGINA = 24   # 24 = 8 filas de 3 tarjetas en pantalla grande
+CARGOS_POR_PAGINA = 50
+
+
+def _paginar_lista(items, page, per_page):
+    """
+    Pagina una lista que YA está en memoria.
+
+    Se usa donde el orden final no se puede resolver en SQL. Caso concreto:
+    la cartera vencida se ordena por saldo pendiente, que es un valor
+    calculado (monto + recargo - pagos), no una columna de la tabla.
+
+    Devuelve (items_de_esta_pagina, info_paginacion). El diccionario de
+    info expone las mismas llaves que el objeto Pagination de
+    Flask-SQLAlchemy (page, pages, total, has_prev, has_next, prev_num,
+    next_num), para que las plantillas usen SIEMPRE la misma sintaxis sin
+    importar de cuál de los dos venga.
+    """
+    total = len(items)
+    total_paginas = max(1, (total + per_page - 1) // per_page)
+    page = min(max(page, 1), total_paginas)  # una página fuera de rango no truena
+    inicio = (page - 1) * per_page
+
+    return items[inicio:inicio + per_page], {
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'pages': total_paginas,
+        'has_prev': page > 1,
+        'has_next': page < total_paginas,
+        'prev_num': page - 1,
+        'next_num': page + 1,
+    }
+
+
 @app.route('/')
 @login_required
 def index():
@@ -1494,29 +1536,61 @@ def index():
     }
 
     filtro = request.args.get('filtro')
+    termino = request.args.get('q', '').strip()
+    page = request.args.get('page', 1, type=int)
     resultados = None
     titulo_filtro = None
+    paginacion = None
 
-    if filtro in filtros_disponibles:
+    if termino:
+        # Búsqueda por texto. Llega aquí como GET (ver buscar() abajo) para
+        # que los enlaces de paginación puedan conservar el término.
+        consulta = Alumno.query.filter(
+            or_(
+                Alumno.matricula_id == termino,
+                Alumno.nombre_completo.ilike(f'%{termino}%')
+            )
+        ).order_by(Alumno.nombre_completo.asc())
+
+        paginacion = consulta.paginate(page=page, per_page=ALUMNOS_POR_PAGINA, error_out=False)
+        resultados = paginacion.items
+
+        if not resultados and page == 1:
+            flash(f'No se encontraron alumnos que coincidan con "{termino}".', 'danger')
+
+    elif filtro in filtros_disponibles:
         titulo_filtro, condicion = filtros_disponibles[filtro]
+
         if filtro == 'recientes':
+            # Ya viene acotado a 10 por definición: no necesita paginarse.
             resultados = Alumno.query.order_by(Alumno.fecha_registro.desc()).limit(10).all()
+
         elif filtro == 'con_adeudo':
             matriculas = _matriculas_con_adeudo()
-            resultados = (
-                Alumno.query
-                .filter(Alumno.matricula_id.in_(matriculas))
-                .order_by(Alumno.nombre_completo.asc())
-                .all()
-            ) if matriculas else []
+            if matriculas:
+                consulta = (
+                    Alumno.query
+                    .filter(Alumno.matricula_id.in_(matriculas))
+                    .order_by(Alumno.nombre_completo.asc())
+                )
+                paginacion = consulta.paginate(page=page, per_page=ALUMNOS_POR_PAGINA, error_out=False)
+                resultados = paginacion.items
+            else:
+                resultados = []
+
         else:
-            resultados = Alumno.query.filter(condicion).order_by(Alumno.nombre_completo.asc()).all()
+            consulta = Alumno.query.filter(condicion).order_by(Alumno.nombre_completo.asc())
+            paginacion = consulta.paginate(page=page, per_page=ALUMNOS_POR_PAGINA, error_out=False)
+            resultados = paginacion.items
 
     return render_template(
         'buscador.html',
         estadisticas=estadisticas,
         resultados=resultados,
-        titulo_filtro=titulo_filtro
+        titulo_filtro=titulo_filtro,
+        termino=termino or None,
+        filtro=filtro,
+        paginacion=paginacion
     )
 
 
@@ -1534,18 +1608,14 @@ def buscar():
         flash('Ingresa una matrícula o un nombre para buscar.', 'warning')
         return redirect(url_for('index'))
 
-    resultados = Alumno.query.filter(
-        or_(
-            Alumno.matricula_id == termino,
-            Alumno.nombre_completo.ilike(f'%{termino}%')
-        )
-    ).order_by(Alumno.nombre_completo.asc()).all()
-
-    if not resultados:
-        flash(f'No se encontraron alumnos que coincidan con "{termino}".', 'danger')
-        return redirect(url_for('index'))
-
-    return render_template('buscador.html', resultados=resultados, termino=termino)
+    # La búsqueda en sí vive en index(): aquí solo se redirige pasando el
+    # término en la URL. Dos motivos:
+    #   1. Los enlaces "Siguiente/Anterior" de la paginación son GET; si el
+    #      resultado se renderizara aquí (POST), al pasar de página se
+    #      perdería el término buscado.
+    #   2. La URL queda compartible y se puede recargar sin que el
+    #      navegador pregunte "¿reenviar formulario?".
+    return redirect(url_for('index', q=termino))
 
 
 # ---------------------------------------------------------------------------
@@ -3287,7 +3357,21 @@ def cartera_vencida():
     Recalcula el recargo de cada uno antes de mostrar, igual que /cobros.
     """
     filas, total_vencido = _calcular_cartera_vencida()
-    return render_template('cartera_vencida.html', filas=filas, total_vencido=total_vencido)
+
+    # La lista se pagina en Python (no en SQL) porque el orden es por saldo
+    # pendiente, que es un valor calculado, no una columna. total_vencido y
+    # total_filas siguen siendo los GLOBALES: las tarjetas de resumen deben
+    # mostrar la cartera completa, no solo lo que se ve en esta página.
+    page = request.args.get('page', 1, type=int)
+    filas_pagina, paginacion = _paginar_lista(filas, page, CARGOS_POR_PAGINA)
+
+    return render_template(
+        'cartera_vencida.html',
+        filas=filas_pagina,
+        total_vencido=total_vencido,
+        total_filas=len(filas),
+        paginacion=paginacion
+    )
 
 
 @app.route('/reportes/cartera-vencida/exportar')

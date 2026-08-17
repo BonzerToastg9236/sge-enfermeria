@@ -222,7 +222,16 @@
                 <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <p class="text-muted mb-0">
                         <i class="bi bi-people-fill me-1"></i>
-                        {{ resultados|length }} resultado(s)
+                        {# Con paginación, resultados|length son solo los de ESTA página.
+                           El total real viene en paginacion.total. #}
+                        {% if paginacion %}
+                            {{ paginacion.total }} resultado(s)
+                            {% if paginacion.pages > 1 %}
+                                <span class="text-secondary">&middot; página {{ paginacion.page }} de {{ paginacion.pages }}</span>
+                            {% endif %}
+                        {% else %}
+                            {{ resultados|length }} resultado(s)
+                        {% endif %}
                         {% if titulo_filtro %}
                             &mdash; <strong>{{ titulo_filtro }}</strong>
                         {% elif termino %}
@@ -276,6 +285,31 @@
                     </div>
                 {% endfor %}
             </div>
+
+            {# --- Paginación --- #}
+            {% if paginacion and paginacion.pages > 1 %}
+                <nav class="mb-5">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item {{ 'disabled' if not paginacion.has_prev }}">
+                            <a class="page-link"
+                               href="{{ url_for('index', filtro=filtro, q=termino, page=paginacion.prev_num) }}">
+                                <i class="bi bi-chevron-left"></i> Anterior
+                            </a>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">
+                                Página {{ paginacion.page }} de {{ paginacion.pages }}
+                            </span>
+                        </li>
+                        <li class="page-item {{ 'disabled' if not paginacion.has_next }}">
+                            <a class="page-link"
+                               href="{{ url_for('index', filtro=filtro, q=termino, page=paginacion.next_num) }}">
+                                Siguiente <i class="bi bi-chevron-right"></i>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            {% endif %}
         {% elif resultados is not none %}
             <div class="row mt-4 mb-5">
                 <div class="col-12 text-center text-muted">
