@@ -28,6 +28,14 @@ class Config:
     # --- Reglas de negocio globales ---
     CUATRIMESTRES_MAXIMOS = 9  # Ajustable según la duración máxima de las carreras
 
+    # --- Zona horaria de la institución ---
+    # El VPS corre en UTC; todo lo que se GUARDA sigue en UTC (ver
+    # ahora_utc() en app.py). Esto es solo para REGLAS DE NEGOCIO que
+    # dependen de "qué día es hoy" (vencimientos, recargos, folios, corte
+    # de caja) y para mostrar fechas/horas en plantillas -- ver hoy_local()
+    # y a_local() en app.py.
+    ZONA_HORARIA = os.environ.get('ZONA_HORARIA', 'America/Mexico_City')
+
     # --- Documentos digitalizados del expediente ---
     # SECURITY-NOTE: NUNCA dentro de static/. Flask sirve todo lo que está
     # bajo static/ públicamente (sin login) a través de su ruta implícita

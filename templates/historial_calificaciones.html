@@ -58,7 +58,7 @@
                                     <tbody>
                                         {% for cambio in historial %}
                                             <tr>
-                                                <td class="text-muted small">{{ cambio.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                                                <td class="text-muted small">{{ cambio.fecha|fechahora }}</td>
                                                 <td>{{ cambio.materia.nombre if cambio.materia else '—' }}</td>
                                                 <td>{{ cambio.periodo_escolar }}</td>
                                                 <td class="cambio-badge">

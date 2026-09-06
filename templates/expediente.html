@@ -203,7 +203,7 @@
                                     <ul class="list-unstyled small mb-0">
                                         {% for h in historial_estatus %}
                                             <li class="mb-2">
-                                                <span class="text-muted">{{ h.fecha.strftime('%d/%m/%Y %H:%M') }}</span>
+                                                <span class="text-muted">{{ h.fecha|fechahora }}</span>
                                                 &mdash;
                                                 {% if h.estatus_anterior %}{{ h.estatus_anterior.value }} → {% endif %}
                                                 <strong>{{ h.estatus_nuevo.value }}</strong>

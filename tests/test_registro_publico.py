@@ -2,13 +2,13 @@
 Pruebas del Módulo de Auto-registro Público (/registro).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from tests.conftest import crear_plan
 
 # generar_matricula() usa el AÑO REAL del sistema, no un valor fijo —
 # usamos lo mismo aquí para que la prueba no dependa de una fecha fija.
-ANIO_ACTUAL = datetime.utcnow().year
+ANIO_ACTUAL = datetime.now(timezone.utc).year
 
 DATOS_VALIDOS_BASE = {
     'nombre_completo': 'María Fernanda López Ramírez',

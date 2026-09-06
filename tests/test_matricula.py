@@ -3,7 +3,7 @@ Pruebas de generar_matricula(): la regla de "Letras de carrera + Año +
 consecutivo" definida desde el inicio del proyecto.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from tests.conftest import crear_plan
 from app import generar_matricula, Alumno, EstatusAlumno, db
@@ -11,7 +11,7 @@ from app import generar_matricula, Alumno, EstatusAlumno, db
 # generar_matricula() usa el AÑO REAL del sistema al momento de generarse
 # (no el año de generación del plan) — usamos lo mismo aquí para que estas
 # pruebas no dependan de una fecha fija ni se rompan solas con el tiempo.
-ANIO_ACTUAL = datetime.utcnow().year
+ANIO_ACTUAL = datetime.now(timezone.utc).year
 
 
 def _guardar_alumno_con_matricula(plan, matricula, curp):

@@ -22,7 +22,11 @@ import logging
 import os
 import re
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta, date, time
+from zoneinfo import ZoneInfo
+
+
+ZONA_HORARIA_DEFAULT = 'America/Mexico_City'
 
 
 def ahora_utc():
@@ -33,8 +37,63 @@ def ahora_utc():
     (columnas DateTime sin timezone). datetime.now(timezone.utc) por sí solo
     devuelve un datetime AWARE, que no se puede comparar directamente con
     los naive que ya hay guardados -- por eso el .replace(tzinfo=None).
+    SIGUE SIENDO CORRECTO PARA GUARDAR en la base de datos: todas las
+    columnas DateTime se guardan en UTC a propósito. Para REGLAS DE
+    NEGOCIO ("¿qué día es hoy para la institución?") usar hoy_local().
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _zona_horaria() -> ZoneInfo:
+    """
+    Zona horaria de la institución (México), configurable vía
+    ZONA_HORARIA en config.py/entorno. No se cachea: se resuelve en cada
+    llamada para que los tests puedan fijar una zona distinta sin reiniciar
+    la app.
+    """
+    return ZoneInfo(app.config.get('ZONA_HORARIA', ZONA_HORARIA_DEFAULT))
+
+
+def hoy_local(tz: ZoneInfo | None = None) -> date:
+    """
+    Fecha de HOY en hora local -- para REGLAS DE NEGOCIO (vencimientos,
+    recargos, folios, "día" de un reporte de corte). NUNCA usar esto para
+    guardar en la base de datos (eso sigue siendo ahora_utc()).
+    Recibe tz opcional para poder probarse sin depender de la app real.
+    """
+    return datetime.now(tz or _zona_horaria()).date()
+
+
+def a_local(dt: datetime | None, tz: ZoneInfo | None = None) -> datetime | None:
+    """
+    Convierte un datetime guardado (naive, en UTC) a hora local naive --
+    para MOSTRAR en plantillas. Si ya llega con tzinfo, se respeta tal cual
+    en vez de asumir UTC por encima.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz or _zona_horaria()).replace(tzinfo=None)
+
+
+def rango_utc_del_dia(fecha_local: date, tz: ZoneInfo | None = None) -> tuple[datetime, datetime]:
+    """
+    Convierte un día calendario LOCAL completo (00:00:00 a 23:59:59.999999)
+    a su rango equivalente en UTC naive -- para filtrar columnas DateTime
+    (guardadas en UTC) por "día" tal como lo vive la institución, no como
+    lo vive el servidor. Ej. México UTC-6: el 20 de marzo local empieza a
+    las 06:00 UTC del 20 y termina a las 05:59:59.999999 UTC del 21 -- sin
+    esto, un pago cobrado por la tarde/noche cae en el corte del día
+    siguiente y el reporte no cuadra con el dinero físico en la caja.
+    """
+    tz = tz or _zona_horaria()
+    inicio_local = datetime.combine(fecha_local, time.min, tzinfo=tz)
+    fin_local = datetime.combine(fecha_local, time.max, tzinfo=tz)
+    return (
+        inicio_local.astimezone(timezone.utc).replace(tzinfo=None),
+        fin_local.astimezone(timezone.utc).replace(tzinfo=None),
+    )
 
 
 def periodo_escolar_actual() -> str:
@@ -46,7 +105,7 @@ def periodo_escolar_actual() -> str:
     que si algún día cambia la convención no rompe nada, solo deja de
     adivinar bien.
     """
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     if hoy.month <= 4:
         letra = 'A'
     elif hoy.month <= 8:
@@ -164,7 +223,7 @@ class Usuario(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     rol = db.Column(db.Enum(RolUsuario), nullable=False, default=RolUsuario.ADMINISTRATIVO)
     activo = db.Column(db.Boolean, default=True, nullable=False)
-    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_creacion = db.Column(db.DateTime, default=ahora_utc)
     ultimo_acceso = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, password_plano: str) -> None:
@@ -217,7 +276,7 @@ class PlanEstudio(db.Model):
     duracion_anios = db.Column(db.Integer, nullable=True)  # Ej. 3 (para mostrar en la Ficha de Inscripción)
     monto_mensualidad = db.Column(db.Numeric(10, 2), nullable=True)  # Precio de mensualidad de esta carrera (solo Directivo lo edita)
     activo = db.Column(db.Boolean, default=True, nullable=False)
-    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_creacion = db.Column(db.DateTime, default=ahora_utc)
 
     # Relaciones
     materias = db.relationship(
@@ -351,7 +410,7 @@ class Alumno(db.Model):
     materias_adeudadas = db.Column(db.Text, nullable=True)  # Nota manual; el cálculo automático llega con el Historial
     faltas_administrativas = db.Column(db.Text, nullable=True)  # Ej. "2 faltas por inasistencia a junta"
 
-    fecha_registro = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_registro = db.Column(db.DateTime, default=ahora_utc)
     fecha_validacion = db.Column(db.DateTime, nullable=True)  # Se llena cuando admin aprueba el pre-registro
 
     # Relaciones
@@ -442,7 +501,7 @@ class DocumentoAlumno(db.Model):
     tipo_documento = db.Column(db.Enum(TipoDocumento), nullable=False)
     nombre_archivo_original = db.Column(db.String(255), nullable=False)
     ruta_archivo = db.Column(db.String(500), nullable=False)  # Ruta relativa dentro de UPLOAD_FOLDER
-    fecha_subida = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_subida = db.Column(db.DateTime, default=ahora_utc)
 
     def __repr__(self):
         return f'<DocumentoAlumno {self.matricula_fk} - {self.tipo_documento.value}>'
@@ -477,7 +536,7 @@ class Calificacion(db.Model):
     calificacion_final = db.Column(db.Float, nullable=False)
     periodo_escolar = db.Column(db.String(20), nullable=False)  # Ej: "2025-B", "Ene-Abr 2025"
 
-    fecha_captura = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_captura = db.Column(db.DateTime, default=ahora_utc)
     capturado_por = db.Column(db.String(100), nullable=True)  # Usuario admin que capturó (auditoría)
     numero_acta = db.Column(db.String(50), nullable=True)  # Referencia al acta física firmada
 
@@ -520,7 +579,7 @@ class HistorialEstatus(db.Model):
     estatus_anterior = db.Column(db.Enum(EstatusAlumno), nullable=True)  # Nulo en el primer registro
     estatus_nuevo = db.Column(db.Enum(EstatusAlumno), nullable=False)
     comentario = db.Column(db.String(255), nullable=True)  # Ej. "Egresado forzado sin todas las materias"
-    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha = db.Column(db.DateTime, default=ahora_utc)
 
     alumno = db.relationship('Alumno', backref=db.backref('historial_estatus', lazy=True, order_by='HistorialEstatus.fecha.desc()'))
     usuario = db.relationship('Usuario')
@@ -548,7 +607,7 @@ class HistorialCalificacion(db.Model):
 
     calificacion_anterior = db.Column(db.Float, nullable=True)
     calificacion_nueva = db.Column(db.Float, nullable=False)
-    fecha = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha = db.Column(db.DateTime, default=ahora_utc)
 
     materia = db.relationship('Materia')
     usuario = db.relationship('Usuario')
@@ -591,7 +650,7 @@ class InscripcionMateria(db.Model):
     periodo_escolar = db.Column(db.String(20), nullable=False)
 
     grupo = db.Column(db.String(20), nullable=True)
-    fecha_inscripcion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_inscripcion = db.Column(db.DateTime, default=ahora_utc)
 
     alumno = db.relationship('Alumno', backref=db.backref('inscripciones_materia', lazy=True))
     materia = db.relationship('Materia')
@@ -651,13 +710,16 @@ class ConceptoCobro(db.Model):
     reportes por concepto sean siempre consistentes.
     """
     __tablename__ = 'conceptos_cobro'
+    __table_args__ = (
+        db.UniqueConstraint('nombre', name='uq_conceptos_cobro_nombre'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(100), unique=True, nullable=False)
+    nombre = db.Column(db.String(100), nullable=False)
     monto_sugerido = db.Column(db.Numeric(10, 2), nullable=True)  # Precio de referencia; se puede ajustar a mano en cada cargo
     es_mensualidad = db.Column(db.Boolean, nullable=False, default=False)  # True = usa el precio por carrera (PlanEstudio.monto_mensualidad) en vez de monto_sugerido
     activo = db.Column(db.Boolean, default=True, nullable=False)
-    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_creacion = db.Column(db.DateTime, default=ahora_utc)
 
     def __repr__(self):
         return f'<ConceptoCobro {self.nombre}>'
@@ -691,7 +753,7 @@ class Beca(db.Model):
     activa = db.Column(db.Boolean, nullable=False, default=True)
 
     otorgada_por_fk = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True)
-    fecha_otorgada = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_otorgada = db.Column(db.DateTime, default=ahora_utc)
     motivo = db.Column(db.String(255), nullable=True)
 
     alumno = db.relationship('Alumno', backref=db.backref('becas', lazy=True, order_by='Beca.fecha_otorgada.desc()'))
@@ -827,7 +889,7 @@ class Cargo(db.Model):
     recargo_congelado = db.Column(db.Boolean, nullable=False, default=False)  # True = Dirección lo condonó/ajustó a mano; ya no se recalcula solo
     periodo_escolar = db.Column(db.String(20), nullable=True)
     fecha_vencimiento = db.Column(db.Date, nullable=True, index=True)  # PERFORMANCE-NOTE (H4): filtrado en cartera vencida/dashboard
-    fecha_generacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_generacion = db.Column(db.DateTime, default=ahora_utc)
     estatus = db.Column(db.Enum(EstatusCargo), default=EstatusCargo.PENDIENTE, nullable=False, index=True)  # PERFORMANCE-NOTE (H4): filtrado en casi todos los reportes de cobros
     comentario = db.Column(db.String(255), nullable=True)  # Ej. motivo de cancelación
 
@@ -864,7 +926,7 @@ class Cargo(db.Model):
         return (
             self.estatus not in (EstatusCargo.PAGADO, EstatusCargo.CANCELADO)
             and self.fecha_vencimiento is not None
-            and self.fecha_vencimiento < ahora_utc().date()
+            and self.fecha_vencimiento < hoy_local()
         )
 
     def actualizar_recargo_si_vencido(self, config=None):
@@ -893,7 +955,7 @@ class Cargo(db.Model):
 
         if config is None:
             config = ConfiguracionCobros.obtener()
-        hoy = ahora_utc().date()
+        hoy = hoy_local()
         dias_de_atraso = (hoy - self.fecha_vencimiento).days - config.dias_gracia
 
         if dias_de_atraso <= 0:
@@ -926,6 +988,9 @@ class Cargo(db.Model):
 class Pago(db.Model):
     """Un pago (total o parcial) aplicado a un Cargo específico."""
     __tablename__ = 'pagos'
+    __table_args__ = (
+        db.UniqueConstraint('folio', name='uq_pagos_folio'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     cargo_fk = db.Column(
@@ -935,9 +1000,9 @@ class Pago(db.Model):
         index=True  # PERFORMANCE-NOTE (H4): base de la agregación de saldo por cargo (ver _matriculas_con_adeudo / _calcular_cartera_vencida)
     )
 
-    folio = db.Column(db.String(30), unique=True, nullable=True)  # Ej. "PAGO-2026-000042"
+    folio = db.Column(db.String(30), nullable=True)  # Ej. "PAGO-2026-000042"
     monto_pagado = db.Column(db.Numeric(10, 2), nullable=False)
-    fecha_pago = db.Column(db.DateTime, default=datetime.utcnow, index=True)  # PERFORMANCE-NOTE (H4): reportes diarios y dashboard filtran por rango de fecha
+    fecha_pago = db.Column(db.DateTime, default=ahora_utc, index=True)  # PERFORMANCE-NOTE (H4): reportes diarios y dashboard filtran por rango de fecha
     metodo_pago = db.Column(db.Enum(MetodoPago), nullable=False, default=MetodoPago.EFECTIVO)
     referencia = db.Column(db.String(100), nullable=True)  # Folio/número de referencia bancaria
     comentario = db.Column(db.String(255), nullable=True)
@@ -1019,7 +1084,7 @@ def siguiente_folio(tipo: str, prefijo: str, digitos: int = 6, intentos_maximos:
     hubiera otros objetos sin commitear en la sesión en ese momento, ese
     rollback también los descartaría.
     """
-    anio_actual = ahora_utc().year
+    anio_actual = hoy_local().year
 
     for _intento in range(intentos_maximos):
         try:
@@ -1048,6 +1113,57 @@ def siguiente_folio(tipo: str, prefijo: str, digitos: int = 6, intentos_maximos:
         'Esto no debería ocurrir en operación normal -- revisar si hay un problema de fondo '
         'con la base de datos antes de reintentar a mano.'
     )
+
+
+# ---------------------------------------------------------------------------
+# FILTROS DE PLANTILLA -- fechas/horas en hora local (México)
+# ---------------------------------------------------------------------------
+# Las columnas DateTime se guardan en UTC (ver ahora_utc()); estos filtros
+# son la única vía para mostrarlas -- las plantillas NUNCA deben llamar
+# .strftime() directamente sobre un DateTime. Las columnas Date puras
+# (fecha_nacimiento, fecha_vencimiento, etc.) siguen mostrándose igual:
+# ya son locales por diseño y no tienen nada que convertir.
+
+MESES_LARGOS_ES = [
+    '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
+
+def _filtro_fechahora(valor, formato='%d/%m/%Y %H:%M'):
+    """|fechahora -- DateTime guardado en UTC, mostrado en hora local."""
+    local = a_local(valor)
+    return local.strftime(formato) if local else '—'
+
+
+def _filtro_fecha(valor, formato='%d/%m/%Y'):
+    """
+    |fecha -- sirve tanto para DateTime (se convierte a local primero)
+    como para Date puro (NO se convierte: ya es local por diseño).
+    """
+    if valor is None:
+        return '—'
+    if isinstance(valor, datetime):
+        return a_local(valor).strftime(formato)
+    return valor.strftime(formato)
+
+
+def _filtro_hora(valor, formato='%H:%M'):
+    """|hora -- solo la hora local de un DateTime."""
+    local = a_local(valor)
+    return local.strftime(formato) if local else '—'
+
+
+def _filtro_fecha_larga(valor):
+    """
+    |fecha_larga -- "17 de agosto de 2026", con meses en español.
+    strftime('%B') depende del locale del sistema operativo, y el VPS de
+    producción (Ubuntu sin locale es_MX instalado) lo devuelve en inglés.
+    """
+    if valor is None:
+        return '—'
+    d = a_local(valor).date() if isinstance(valor, datetime) else valor
+    return f'{d.day} de {MESES_LARGOS_ES[d.month]} de {d.year}'
 
 
 # ---------------------------------------------------------------------------
@@ -1091,6 +1207,14 @@ def create_app(config_name='development'):
     csrf.init_app(app)
     limiter.init_app(app)
     mail.init_app(app)
+
+    # Filtros de fecha/hora en hora local (ver sección FILTROS DE PLANTILLA
+    # arriba). Sin esto, las plantillas que ya los usan (|fechahora,
+    # |fecha_larga, etc.) truenan con TemplateAssertionError.
+    app.add_template_filter(_filtro_fechahora, 'fechahora')
+    app.add_template_filter(_filtro_fecha, 'fecha')
+    app.add_template_filter(_filtro_hora, 'hora')
+    app.add_template_filter(_filtro_fecha_larga, 'fecha_larga')
 
     # Asegura que exista la carpeta física donde se guardan los documentos
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -1377,7 +1501,7 @@ def nuevo_usuario():
 @rol_requerido('DIRECTIVO')
 def toggle_usuario(user_id):
     """Activa/desactiva una cuenta sin borrarla (mejor que eliminarla: conserva auditoría)."""
-    usuario = Usuario.query.get_or_404(user_id)
+    usuario = db.get_or_404(Usuario, user_id)
 
     if usuario.id == current_user.id:
         flash('No puedes desactivar tu propia cuenta.', 'danger')
@@ -2154,7 +2278,7 @@ CAMPOS_DOCUMENTOS = {
 @app.route('/alumno/<matricula>/documentos', methods=['GET', 'POST'])
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
 def documentos(matricula):
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     if request.method == 'POST':
         # --- 1. Actualizar datos complementarios del expediente ---
@@ -2245,7 +2369,7 @@ def ver_documento(matricula, doc_id):
     no conoce -- aunque ambos estén detrás del mismo control de rol, cada
     documento debe amarrarse a su propio expediente.
     """
-    documento = DocumentoAlumno.query.get_or_404(doc_id)
+    documento = db.get_or_404(DocumentoAlumno, doc_id)
     if documento.matricula_fk != matricula:
         abort(404)
 
@@ -2270,7 +2394,7 @@ def eliminar_documento(doc_id):
     del disco y su registro en la base de datos, y regresa al expediente
     del mismo alumno.
     """
-    documento = DocumentoAlumno.query.get_or_404(doc_id)
+    documento = db.get_or_404(DocumentoAlumno, doc_id)
     matricula = documento.matricula_fk
     tipo_valor = documento.tipo_documento.value
 
@@ -2301,7 +2425,7 @@ def eliminar_documento(doc_id):
 @app.route('/alumno/<matricula>/expediente')
 @login_required
 def ver_expediente(matricula):
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     # Todas las materias del plan del alumno (el "Escudo": solo las de SU plan)
     materias_plan = (
@@ -2352,7 +2476,7 @@ def ficha_inscripcion(matricula):
     No requiere formulario propio: es una vista de solo lectura para
     imprimir/archivar, con checklist de documentos recibidos en el reverso.
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     documentos_alumno = DocumentoAlumno.query.filter_by(matricula_fk=matricula).all()
     documentos_subidos = {doc.tipo_documento for doc in documentos_alumno}
@@ -2376,7 +2500,7 @@ def cambiar_estatus(matricula):
     marcar como EGRESADO y el alumno tiene materias sin aprobar, se pide
     un comentario justificando el motivo (advertencia, no bloqueo total).
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
     nuevo_estatus_raw = request.form.get('nuevo_estatus', '')
     comentario = request.form.get('comentario', '').strip() or None
 
@@ -2459,7 +2583,7 @@ def cambiar_estatus(matricula):
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
 def avanzar_cuatrimestre(matricula):
     """Avanza a UN alumno al siguiente cuatrimestre -- para casos sueltos (ej. alguien que regresó de Baja Temporal)."""
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     ok, mensaje, cargos, materias = _avanzar_cuatrimestre(alumno)
 
@@ -2487,7 +2611,7 @@ def avanzar_cuatrimestre(matricula):
 @app.route('/alumno/<matricula>/cobros')
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def cobros(matricula):
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
     cargos = Cargo.query.filter_by(matricula_fk=matricula).order_by(Cargo.fecha_generacion.desc()).all()
 
     # Recargos "automáticos": se recalculan cada vez que se consulta la
@@ -2529,7 +2653,7 @@ def becas_alumno(matricula):
     y todavía no tienen ningún pago, se les ajusta el monto de una vez
     (para no obligar a cancelar y recrear a mano).
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     if request.method == 'POST':
         nombre = request.form.get('nombre', '').strip()
@@ -2614,7 +2738,7 @@ def becas_alumno(matricula):
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def desactivar_beca(beca_id):
     """Desactiva una beca -- los cargos que ya se generaron con el descuento NO se revierten automáticamente."""
-    beca = Beca.query.get_or_404(beca_id)
+    beca = db.get_or_404(Beca, beca_id)
     beca.activa = False
     db.session.commit()
     flash(f'Beca "{beca.nombre}" desactivada. Los cargos ya generados con ese descuento no se revierten solos.', 'warning')
@@ -2638,7 +2762,7 @@ def _cargo_duplicado(matricula, concepto_cobro_id, periodo_escolar):
 
 def _meses_del_cuatrimestre_actual():
     """[(año, mes), ...] de los 4 meses del cuatrimestre EN CURSO (A=Ene-Abr, B=May-Ago, C=Sep-Dic)."""
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     if hoy.month <= 4:
         meses = [1, 2, 3, 4]
     elif hoy.month <= 8:
@@ -2803,7 +2927,7 @@ def _avanzar_cuatrimestre(alumno):
 @app.route('/alumno/<matricula>/cobros/nuevo', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def nuevo_cargo(matricula):
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     concepto_cobro_id_raw = request.form.get('concepto_cobro_id', '').strip()
     monto_raw = request.form.get('monto', '').strip()
@@ -2934,7 +3058,7 @@ def enviar_recordatorio_vencimiento(alumno, cargo):
 @app.route('/cobro/<int:cargo_id>/pagar', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def registrar_pago(cargo_id):
-    cargo = Cargo.query.get_or_404(cargo_id)
+    cargo = db.get_or_404(Cargo, cargo_id)
 
     if cargo.estatus == EstatusCargo.CANCELADO:
         flash('Este cargo está cancelado; no se le pueden registrar pagos.', 'danger')
@@ -2976,7 +3100,7 @@ def registrar_pago(cargo_id):
     db.session.add(pago)
     db.session.flush()  # Asigna pago.id (lo necesitamos para armar el folio) y refleja el pago en saldo_pendiente()
 
-    pago.folio = f'PAGO-{ahora_utc().year}-{pago.id:06d}'
+    pago.folio = f'PAGO-{hoy_local().year}-{pago.id:06d}'
 
     cargo.actualizar_estatus()
     db.session.commit()
@@ -3004,7 +3128,7 @@ def anular_pago(pago_id):
     cancelar un cargo: es una acción financiera que corrige un error, no
     una operación del día a día.
     """
-    pago = Pago.query.get_or_404(pago_id)
+    pago = db.get_or_404(Pago, pago_id)
     cargo = pago.cargo
 
     if pago.anulado:
@@ -3038,7 +3162,7 @@ def anular_pago(pago_id):
 @app.route('/cobro/<int:cargo_id>/cancelar', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def cancelar_cargo(cargo_id):
-    cargo = Cargo.query.get_or_404(cargo_id)
+    cargo = db.get_or_404(Cargo, cargo_id)
     comentario = request.form.get('comentario', '').strip() or None
 
     if cargo.total_pagado() > 0:
@@ -3069,7 +3193,7 @@ def condonar_recargo(cargo_id):
     "congelado": actualizar_recargo_si_vencido() ya no lo vuelve a subir
     solo, para no borrar la condonación en la siguiente consulta.
     """
-    cargo = Cargo.query.get_or_404(cargo_id)
+    cargo = db.get_or_404(Cargo, cargo_id)
 
     if cargo.estatus == EstatusCargo.CANCELADO:
         flash('Este cargo está cancelado; no tiene sentido condonarle recargo.', 'danger')
@@ -3111,7 +3235,7 @@ def condonar_recargo(cargo_id):
 @app.route('/pago/<int:pago_id>/recibo')
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def recibo_pago(pago_id):
-    pago = Pago.query.get_or_404(pago_id)
+    pago = db.get_or_404(Pago, pago_id)
     return render_template('recibo_pago.html', pago=pago, cargo=pago.cargo, alumno=pago.cargo.alumno)
 
 
@@ -3124,7 +3248,7 @@ def estado_cuenta(matricula):
     es la pantalla de trabajo diario), esta vista es de solo lectura,
     pensada para entregarse o archivarse.
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
     cargos = Cargo.query.filter_by(matricula_fk=matricula).order_by(Cargo.fecha_generacion.asc()).all()
 
     for cargo in cargos:
@@ -3150,9 +3274,15 @@ def _calcular_reporte_cobros_del_dia(fecha_reporte):
     Extraída de reporte_cobros_del_dia() para que la vista en pantalla y
     la exportación a Excel usen SIEMPRE el mismo cálculo -- nunca se
     desincronizan entre sí.
+
+    fecha_reporte es un día CALENDARIO LOCAL (el que vivió la caja); como
+    Pago.fecha_pago se guarda en UTC, el rango de búsqueda tiene que
+    convertirse a UTC con rango_utc_del_dia() -- comparar contra
+    medianoche-a-medianoche naive (como si fecha_reporte ya fuera UTC)
+    hacía que un pago cobrado por la noche apareciera en el corte del
+    día siguiente.
     """
-    inicio_dia = datetime.combine(fecha_reporte, datetime.min.time())
-    fin_dia = datetime.combine(fecha_reporte, datetime.max.time())
+    inicio_dia, fin_dia = rango_utc_del_dia(fecha_reporte)
 
     pagos_del_dia = (
         Pago.query
@@ -3186,9 +3316,9 @@ def reporte_cobros_del_dia():
     """
     fecha_raw = request.args.get('fecha', '')
     try:
-        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else ahora_utc().date()
+        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else hoy_local()
     except ValueError:
-        fecha_reporte = ahora_utc().date()
+        fecha_reporte = hoy_local()
         flash('La fecha indicada no era válida; se muestra el día de hoy.', 'warning')
 
     pagos_del_dia, total_del_dia, totales_por_concepto, totales_por_metodo = _calcular_reporte_cobros_del_dia(fecha_reporte)
@@ -3208,9 +3338,9 @@ def reporte_cobros_del_dia():
 def exportar_reporte_cobros_del_dia():
     fecha_raw = request.args.get('fecha', '')
     try:
-        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else ahora_utc().date()
+        fecha_reporte = datetime.strptime(fecha_raw, '%Y-%m-%d').date() if fecha_raw else hoy_local()
     except ValueError:
-        fecha_reporte = ahora_utc().date()
+        fecha_reporte = hoy_local()
 
     pagos_del_dia, total_del_dia, totales_por_concepto, totales_por_metodo = _calcular_reporte_cobros_del_dia(fecha_reporte)
 
@@ -3300,7 +3430,7 @@ def _calcular_cartera_vencida():
          agregación SQL (mismo patrón que _matriculas_con_adeudo), en vez
          de que cada cargo dispare su propia consulta a Pago.
     """
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     config = ConfiguracionCobros.obtener()  # una sola vez, no una vez por cargo
 
     candidatos = (
@@ -3430,7 +3560,7 @@ MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', '
 
 def _rango_ultimos_n_meses(n=6):
     """Lista de diccionarios describiendo cada uno de los últimos n meses (incluye el actual)."""
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     rangos = []
     for i in range(n - 1, -1, -1):
         mes_ref = hoy.month - i
@@ -3485,7 +3615,7 @@ def _calcular_dashboard_cobros():
     # va a abrir, así que se arregla igual: config cargada una sola vez, y
     # el saldo de todos los cargos abiertos calculado con UNA agregación
     # SQL en vez de que cada cargo dispare su propia consulta a Pago.
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     config = ConfiguracionCobros.obtener()
     cargos_abiertos = Cargo.query.filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL])).all()
     hubo_cambios = False
@@ -3597,7 +3727,7 @@ def _vencimiento_dia_10_sugerido() -> str:
     alumno tiene del 1 al 10 del mes para pagar. Si ya pasó el día 10 de
     este mes, se sugiere el día 10 del mes siguiente.
     """
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     anio, mes = hoy.year, hoy.month
     if hoy.day > 10:
         mes += 1
@@ -3716,7 +3846,7 @@ def avanzar_cuatrimestre_lote():
         plan_id = request.form.get('plan_id', type=int)
         cuatrimestre_actual = request.form.get('cuatrimestre_actual', type=int)
 
-        plan = PlanEstudio.query.get(plan_id) if plan_id else None
+        plan = db.session.get(PlanEstudio, plan_id) if plan_id else None
         if not plan or not cuatrimestre_actual:
             flash('Selecciona carrera y el cuatrimestre en el que están ahora.', 'danger')
             return render_template('avanzar_cuatrimestre.html', planes=planes, max_cuatrimestres=max_cuatri)
@@ -3766,7 +3896,7 @@ def recordatorios_vencimiento():
     para correrse una vez al día; cuando el sistema esté en el VPS se
     puede automatizar con un cron que llame esta misma ruta.
     """
-    hoy = ahora_utc().date()
+    hoy = hoy_local()
     limite = hoy + timedelta(days=DIAS_AVISO_VENCIMIENTO)
 
     candidatos = (
@@ -3804,7 +3934,7 @@ def planes_mensualidades():
     if request.method == 'POST':
         plan_id = request.form.get('plan_id', '').strip()
         monto_raw = request.form.get('monto_mensualidad', '').strip()
-        plan = PlanEstudio.query.get_or_404(int(plan_id)) if plan_id.isdigit() else None
+        plan = db.get_or_404(PlanEstudio, int(plan_id)) if plan_id.isdigit() else None
 
         if not plan:
             flash('Plan de estudios no encontrado.', 'danger')
@@ -3843,7 +3973,7 @@ def gestionar_materias(plan_id):
     académica) respeta -- agregar una materia aquí por error se propaga
     a todo el sistema, así que queda con el rol más restringido.
     """
-    plan = PlanEstudio.query.get_or_404(plan_id)
+    plan = db.get_or_404(PlanEstudio, plan_id)
     max_cuatri = _max_periodos()
 
     if request.method == 'POST':
@@ -3907,7 +4037,7 @@ def eliminar_materia(materia_id):
     ni carga académica registradas con ella. Igual que con Cargo, no se
     permite borrar algo que ya dejó huella en el sistema.
     """
-    materia = Materia.query.get_or_404(materia_id)
+    materia = db.get_or_404(Materia, materia_id)
     plan_id = materia.id_plan_fk
 
     tiene_calificaciones = Calificacion.query.filter_by(id_materia_fk=materia.id).first() is not None
@@ -3967,7 +4097,7 @@ def editar_precio_concepto(concepto_id):
     para cuando cambian las cuotas cada año (algo poco frecuente, no
     necesita un CRUD completo, solo poder tocar el número).
     """
-    concepto = ConceptoCobro.query.get_or_404(concepto_id)
+    concepto = db.get_or_404(ConceptoCobro, concepto_id)
     monto_sugerido_raw = request.form.get('monto_sugerido', '').strip()
     es_mensualidad = request.form.get('es_mensualidad') == 'on'
 
@@ -3992,7 +4122,7 @@ def editar_precio_concepto(concepto_id):
 @app.route('/conceptos-cobro/<int:concepto_id>/toggle', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def toggle_concepto_cobro(concepto_id):
-    concepto = ConceptoCobro.query.get_or_404(concepto_id)
+    concepto = db.get_or_404(ConceptoCobro, concepto_id)
     concepto.activo = not concepto.activo
     db.session.commit()
 
@@ -4145,7 +4275,7 @@ def _siguiente_numero_acta() -> str:
 @app.route('/alumno/<matricula>/boleta', methods=['GET', 'POST'])
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
 def boleta(matricula):
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     cuatrimestre_seleccionado = request.values.get('cuatrimestre', type=int)
     if not cuatrimestre_seleccionado:
@@ -4278,7 +4408,7 @@ def plantilla_boletas():
     plan_id = request.args.get('plan_id', type=int)
     cuatrimestre = request.args.get('cuatrimestre', type=int)
 
-    plan = PlanEstudio.query.get_or_404(plan_id) if plan_id else None
+    plan = db.get_or_404(PlanEstudio, plan_id) if plan_id else None
     if not plan or not cuatrimestre:
         flash('Selecciona carrera y cuatrimestre antes de descargar la plantilla.', 'danger')
         return redirect(url_for('boletas_importar'))
@@ -4358,7 +4488,7 @@ def importar_boletas():
 
     planes = PlanEstudio.query.filter_by(activo=True).order_by(PlanEstudio.nombre.asc()).all()
 
-    plan = PlanEstudio.query.get(plan_id) if plan_id else None
+    plan = db.session.get(PlanEstudio, plan_id) if plan_id else None
     if not plan or not cuatrimestre:
         flash('Selecciona carrera y cuatrimestre.', 'danger')
         return render_template('boletas_importar.html', planes=planes, max_cuatrimestres=_max_periodos(), periodo_escolar_sugerido=periodo_escolar_actual())
@@ -4505,7 +4635,7 @@ def historial_calificaciones(matricula):
     calificación de este alumno, quién lo hizo y cuándo. Cubre tanto la
     captura individual como la carga masiva -- ambas registran aquí.
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
     historial = (
         HistorialCalificacion.query
         .filter_by(matricula_fk=matricula)
@@ -4525,7 +4655,7 @@ def carga_academica(matricula):
     NO se recalcula contra el plan actual -- así sigue siendo correcto
     aunque el plan de estudios cambie después de que el alumno se inscribió.
     """
-    alumno = Alumno.query.get_or_404(matricula)
+    alumno = db.get_or_404(Alumno, matricula)
 
     periodos_disponibles = sorted({
         i.periodo_escolar for i in

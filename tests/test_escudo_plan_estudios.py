@@ -276,5 +276,5 @@ def test_no_se_puede_eliminar_materia_con_calificaciones(client, app):
 
     client.post(f'/materias/{materia.id}/eliminar', follow_redirects=True)
 
-    from app import Materia
-    assert Materia.query.get(materia.id) is not None  # sigue existiendo, no se dejó borrar
+    from app import Materia, db
+    assert db.session.get(Materia, materia.id) is not None  # sigue existiendo, no se dejó borrar

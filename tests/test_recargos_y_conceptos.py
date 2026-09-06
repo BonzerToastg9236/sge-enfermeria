@@ -4,16 +4,24 @@ y del cálculo de recargos por atraso (auto-ajustable: monto fijo,
 porcentaje, o por día).
 """
 
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from decimal import Decimal
 
 from tests.conftest import crear_plan, crear_alumno, crear_usuario, login
-from app import db, Cargo, EstatusCargo, ConceptoCobro, ConfiguracionCobros, TipoRecargo, RolUsuario
+from app import db, Cargo, EstatusCargo, ConceptoCobro, ConfiguracionCobros, TipoRecargo, RolUsuario, hoy_local
 
 
 def _crear_cargo_vencido(alumno, dias_vencido=5, monto='1000.00'):
-    """Crea un cargo cuya fecha de vencimiento ya pasó hace `dias_vencido` días."""
-    hoy = datetime.utcnow().date()
+    """
+    Crea un cargo cuya fecha de vencimiento ya pasó hace `dias_vencido`
+    días. Usa hoy_local() (no la fecha UTC) porque fecha_vencimiento es
+    una fecha de NEGOCIO -- "cuántos días de atraso lleva" se cuenta en
+    el calendario de México, el mismo que usa actualizar_recargo_si_vencido()
+    -- ver test_zona_horaria.py para el caso que expone esta diferencia
+    (falla real, no hipotética: entre las 6 PM y la medianoche en México,
+    la fecha UTC ya es un día distinto a la fecha de México).
+    """
+    hoy = hoy_local()
     cargo = Cargo(
         matricula_fk=alumno.matricula_id,
         concepto='Colegiatura de Prueba',
@@ -142,7 +150,7 @@ def test_folio_de_pago_tiene_el_formato_esperado(client, app):
 
     from app import Pago
     pago = Pago.query.filter_by(cargo_fk=cargo.id).first()
-    anio_actual = datetime.utcnow().year
+    anio_actual = hoy_local().year  # pago.folio usa el año local (México), no el de UTC
 
     assert pago.folio is not None
     assert pago.folio.startswith(f'PAGO-{anio_actual}-')
@@ -166,7 +174,7 @@ def test_directivo_puede_condonar_recargo(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.recargo_aplicado == Decimal('50.00')
     assert cargo_actualizado.recargo_congelado is True
 
@@ -196,7 +204,7 @@ def test_recargo_condonado_no_vuelve_a_subir_solo(client, app):
 
     # Se vuelve a llamar la recalculación automática, como pasaría cada
     # vez que alguien abre la pantalla de /cobros de este alumno.
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     cargo_actualizado.actualizar_recargo_si_vencido()
     db.session.commit()
 
@@ -221,7 +229,7 @@ def test_no_se_puede_aumentar_recargo_via_condonacion(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.recargo_aplicado == Decimal('100.00')  # no se movió
     assert cargo_actualizado.recargo_congelado is False
 
@@ -247,6 +255,6 @@ def test_contador_no_puede_condonar_recargo(client, app):
     assert respuesta.status_code == 200
     assert 'permisos'.encode('utf-8') in respuesta.data.lower()
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.recargo_aplicado == Decimal('100.00')
 

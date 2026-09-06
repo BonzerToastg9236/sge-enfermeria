@@ -6,3 +6,4 @@
 # En el VPS de producción NO necesitas este archivo.
 
 pytest==8.3.4
+freezegun==1.5.5  # Congela la hora del reloj en tests/test_zona_horaria.py -- sin esto no se puede probar el caso límite UTC/México sin esperar a que sea esa hora de verdad.

@@ -34,7 +34,7 @@
             {% include '_nav.html' %}
         </div>
         <h1 class="fw-bold"><i class="bi bi-graph-up me-2"></i>Reporte de Cobros del Día</h1>
-        <p class="mb-0 opacity-75">{{ fecha_reporte.strftime('%d de %B de %Y') }}</p>
+        <p class="mb-0 opacity-75">{{ fecha_reporte|fecha_larga }}</p>
     </div>
 
     <div class="container">
@@ -141,7 +141,7 @@
                                         {% for pago in pagos_del_dia %}
                                             <tr>
                                                 <td><code>{{ pago.folio or ('#' ~ pago.id) }}</code></td>
-                                                <td>{{ pago.fecha_pago.strftime('%H:%M') }}</td>
+                                                <td>{{ pago.fecha_pago|hora }}</td>
                                                 <td>
                                                     {% if pago.cargo and pago.cargo.alumno %}
                                                         {{ pago.cargo.alumno.nombre_completo }}

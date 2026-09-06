@@ -111,7 +111,7 @@
                             <tbody>
                                 {% for cargo in cargos %}
                                     <tr>
-                                        <td>{{ cargo.fecha_generacion.strftime('%d/%m/%Y') }}</td>
+                                        <td>{{ cargo.fecha_generacion|fecha }}</td>
                                         <td>{{ cargo.concepto }}</td>
                                         <td>{{ cargo.periodo_escolar or '—' }}</td>
                                         <td class="text-end">${{ '%.2f'|format(cargo.monto) }}</td>

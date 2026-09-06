@@ -96,5 +96,5 @@ def test_administrativo_no_puede_desactivar_cuentas(client, app):
     assert respuesta.status_code == 200
     assert 'permisos'.encode('utf-8') in respuesta.data.lower()
 
-    from app import Usuario
-    assert Usuario.query.get(directivo.id).activo is True  # sigue activo, no se tocó
+    from app import Usuario, db
+    assert db.session.get(Usuario, directivo.id).activo is True  # sigue activo, no se tocó

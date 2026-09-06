@@ -79,7 +79,7 @@
                         </div>
                         <div class="col-6">
                             <div class="dato-label">Fecha de Pago</div>
-                            <div class="dato-valor">{{ pago.fecha_pago.strftime('%d/%m/%Y %H:%M') }}</div>
+                            <div class="dato-valor">{{ pago.fecha_pago|fechahora }}</div>
                         </div>
                         <div class="col-6">
                             <div class="dato-label">Referencia</div>

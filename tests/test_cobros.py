@@ -8,7 +8,7 @@ cancelar cargos.
 from decimal import Decimal
 
 from tests.conftest import crear_plan, crear_alumno, crear_usuario, login
-from app import db, Cargo, EstatusCargo, RolUsuario, ConceptoCobro, EstatusAlumno, Alumno, Pago
+from app import db, Cargo, EstatusCargo, RolUsuario, ConceptoCobro, EstatusAlumno, Alumno, Pago, ConfiguracionInstitucion
 
 
 def _crear_cargo(alumno, concepto='Colegiatura de Prueba', monto='1500.00'):
@@ -58,7 +58,7 @@ def test_pago_parcial_deja_estatus_parcial_y_saldo_correcto(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.total_pagado() == Decimal('500.00')
     assert cargo_actualizado.saldo_pendiente() == Decimal('1000.00')
     assert cargo_actualizado.estatus == EstatusCargo.PARCIAL
@@ -77,7 +77,7 @@ def test_pago_completo_deja_estatus_pagado(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.saldo_pendiente() == Decimal('0.00')
     assert cargo_actualizado.estatus == EstatusCargo.PAGADO
 
@@ -95,7 +95,7 @@ def test_no_se_puede_pagar_mas_del_saldo_pendiente(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.total_pagado() == Decimal('0.00')  # el pago NO se registró
     assert cargo_actualizado.estatus == EstatusCargo.PENDIENTE
 
@@ -114,7 +114,7 @@ def test_administrativo_puede_registrar_pagos(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.estatus == EstatusCargo.PAGADO
 
 
@@ -149,7 +149,7 @@ def test_administrativo_no_puede_cancelar_cargos(client, app):
     assert respuesta.status_code == 200
     assert 'permisos'.encode('utf-8') in respuesta.data.lower()
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.estatus != EstatusCargo.CANCELADO
 
 
@@ -172,7 +172,7 @@ def test_directivo_si_puede_crear_y_cancelar_cargos(client, app):
 
     client.post(f'/cobro/{cargo.id}/cancelar', data={'comentario': 'Duplicado'}, follow_redirects=True)
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.estatus == EstatusCargo.CANCELADO
 
 
@@ -220,8 +220,8 @@ def test_activar_alumno_dos_veces_no_duplica_cargos(client, app):
     db.session.commit()
 
     alumno = crear_alumno(plan, curp='HHHH010101HDFXYZ08', estatus=EstatusAlumno.ACTIVO)
-    from datetime import datetime as dt
-    alumno.fecha_validacion = dt.utcnow()  # ya había sido validado antes
+    from datetime import datetime as dt, timezone
+    alumno.fecha_validacion = dt.now(timezone.utc).replace(tzinfo=None)  # ya había sido validado antes
     db.session.commit()
 
     crear_usuario()
@@ -303,10 +303,20 @@ def test_avanzar_cuatrimestre_individual_genera_reinscripcion_y_mensualidades(cl
 
 
 def test_no_avanza_alumno_en_ultimo_cuatrimestre(client, app):
-    from app import app as flask_app
+    """
+    NOTA: el límite se valida contra ConfiguracionInstitucion.obtener().max_periodos
+    -- la fuente real de verdad en tiempo de ejecución (ver _max_periodos()
+    en app.py) -- y NO contra flask_app.config['CUATRIMESTRES_MAXIMOS'], que
+    es un valor fijo de config.py que _max_periodos() ya no usa. Antes esta
+    prueba comparaba contra ese config fijo; pasaba solo porque ambos
+    valores por defecto coinciden en 9, pero dejaba de representar el
+    límite real en cuanto alguien cambiara max_periodos desde Configuración.
+    """
+    max_periodos = ConfiguracionInstitucion.obtener().max_periodos
+
     plan = crear_plan(nombre='Carrera Tope', clave='CTP')
     alumno = crear_alumno(plan, curp='LLLL010101HDFXYZ12', estatus=EstatusAlumno.ACTIVO)
-    alumno.cuatrimestre_actual = flask_app.config['CUATRIMESTRES_MAXIMOS']
+    alumno.cuatrimestre_actual = max_periodos
     db.session.commit()
 
     crear_usuario()
@@ -315,7 +325,7 @@ def test_no_avanza_alumno_en_ultimo_cuatrimestre(client, app):
     client.post(f'/alumno/{alumno.matricula_id}/avanzar-cuatrimestre', follow_redirects=True)
 
     alumno_actualizado = db.session.get(Alumno, alumno.matricula_id)
-    assert alumno_actualizado.cuatrimestre_actual == flask_app.config['CUATRIMESTRES_MAXIMOS']  # no cambió
+    assert alumno_actualizado.cuatrimestre_actual == max_periodos  # no cambió
 
 
 def test_avanzar_cuatrimestre_en_lote_solo_toma_activos_del_cuatrimestre_indicado(client, app):
@@ -365,7 +375,7 @@ def test_anular_pago_excluye_del_saldo_y_del_estatus(client, app):
         follow_redirects=True
     )
 
-    cargo_actualizado = Cargo.query.get(cargo.id)
+    cargo_actualizado = db.session.get(Cargo, cargo.id)
     assert cargo_actualizado.estatus == EstatusCargo.PAGADO
     pago = cargo_actualizado.pagos[0]
 
@@ -376,8 +386,8 @@ def test_anular_pago_excluye_del_saldo_y_del_estatus(client, app):
         follow_redirects=True
     )
 
-    cargo_tras_anular = Cargo.query.get(cargo.id)
-    pago_tras_anular = Pago.query.get(pago.id)
+    cargo_tras_anular = db.session.get(Cargo, cargo.id)
+    pago_tras_anular = db.session.get(Pago, pago.id)
 
     assert pago_tras_anular.anulado is True
     assert pago_tras_anular.motivo_anulacion == 'Monto capturado por error, era de otro alumno'
@@ -393,11 +403,11 @@ def test_no_se_puede_anular_un_pago_sin_motivo(client, app):
     login(client, 'directivo1', 'clave12345')
 
     client.post(f'/cobro/{cargo.id}/pagar', data={'monto_pagado': '500.00', 'metodo_pago': 'EFECTIVO'}, follow_redirects=True)
-    pago = Cargo.query.get(cargo.id).pagos[0]
+    pago = db.session.get(Cargo, cargo.id).pagos[0]
 
     client.post(f'/pago/{pago.id}/anular', data={'motivo_anulacion': 'x'}, follow_redirects=True)
 
-    pago_sin_cambios = Pago.query.get(pago.id)
+    pago_sin_cambios = db.session.get(Pago, pago.id)
     assert pago_sin_cambios.anulado is False  # se rechazó por motivo demasiado corto
 
 
@@ -409,7 +419,7 @@ def test_administrativo_no_puede_anular_pagos(client, app):
     crear_usuario()
     login(client, 'directivo1', 'clave12345')
     client.post(f'/cobro/{cargo.id}/pagar', data={'monto_pagado': '800.00', 'metodo_pago': 'EFECTIVO'}, follow_redirects=True)
-    pago = Cargo.query.get(cargo.id).pagos[0]
+    pago = db.session.get(Cargo, cargo.id).pagos[0]
     client.get('/logout')
 
     crear_usuario(username='admin1', rol=RolUsuario.ADMINISTRATIVO)
@@ -418,7 +428,7 @@ def test_administrativo_no_puede_anular_pagos(client, app):
     respuesta = client.post(f'/pago/{pago.id}/anular', data={'motivo_anulacion': 'Intento no autorizado'}, follow_redirects=True)
 
     assert respuesta.status_code in (403, 200)  # según cómo maneje rol_requerido el redireccionamiento/])
-    pago_sin_cambios = Pago.query.get(pago.id)
+    pago_sin_cambios = db.session.get(Pago, pago.id)
     assert pago_sin_cambios.anulado is False
 
 
@@ -493,7 +503,7 @@ def test_beca_ajusta_cargos_de_mensualidad_ya_generados_sin_pagos(client, app):
         follow_redirects=True
     )
 
-    cargo_despues = Cargo.query.get(cargo_antes.id)
+    cargo_despues = db.session.get(Cargo, cargo_antes.id)
     assert cargo_despues.monto == Decimal('700.00')  # 1000 - 300
 
 
@@ -526,5 +536,5 @@ def test_beca_no_ajusta_cargo_que_ya_tiene_un_pago(client, app):
         follow_redirects=True
     )
 
-    cargo_sin_tocar = Cargo.query.get(cargo.id)
+    cargo_sin_tocar = db.session.get(Cargo, cargo.id)
     assert cargo_sin_tocar.monto == Decimal('1000.00')  # NUNCA se ajusta si ya tiene un pago

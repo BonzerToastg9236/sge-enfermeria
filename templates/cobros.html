@@ -204,7 +204,7 @@
                                                         <span class="text-decoration-line-through">
                                                             <i class="bi bi-x-circle text-danger me-1"></i>
                                                             ${{ '%.2f'|format(pago.monto_pagado) }} &middot; {{ pago.metodo_pago.value }}
-                                                            &middot; {{ pago.fecha_pago.strftime('%d/%m/%Y') }}
+                                                            &middot; {{ pago.fecha_pago|fecha }}
                                                             {% if pago.folio %}&middot; <code>{{ pago.folio }}</code>{% endif %}
                                                         </span>
                                                         <span class="badge bg-secondary">
@@ -217,7 +217,7 @@
                                                         <span>
                                                             <i class="bi bi-check-circle text-success me-1"></i>
                                                             ${{ '%.2f'|format(pago.monto_pagado) }} &middot; {{ pago.metodo_pago.value }}
-                                                            &middot; {{ pago.fecha_pago.strftime('%d/%m/%Y') }}
+                                                            &middot; {{ pago.fecha_pago|fecha }}
                                                             {% if pago.folio %}&middot; <code>{{ pago.folio }}</code>{% endif %}
                                                         </span>
                                                         <span class="d-flex align-items-center gap-2">

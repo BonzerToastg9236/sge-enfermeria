@@ -93,7 +93,7 @@
                                                 {% endif %}
                                             </td>
                                             <td class="text-muted small">
-                                                {{ u.ultimo_acceso.strftime('%d/%m/%Y %H:%M') if u.ultimo_acceso else 'Nunca' }}
+                                                {{ u.ultimo_acceso|fechahora if u.ultimo_acceso else 'Nunca' }}
                                             </td>
                                             <td class="text-end">
                                                 {% if u.id != current_user.id %}

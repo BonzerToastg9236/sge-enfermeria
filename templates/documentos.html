@@ -332,7 +332,7 @@
                                             <i class="bi bi-file-earmark-check text-success me-1"></i>
                                             <strong>{{ doc.tipo_documento.value }}</strong>
                                             &mdash; {{ doc.nombre_archivo_original }}
-                                            <span class="text-muted">({{ doc.fecha_subida.strftime('%d/%m/%Y %H:%M') }})</span>
+                                            <span class="text-muted">({{ doc.fecha_subida|fechahora }})</span>
                                         </span>
                                         <div class="d-flex gap-2">
                                             <button
