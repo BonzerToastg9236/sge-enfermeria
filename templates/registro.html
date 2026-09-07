@@ -158,7 +158,15 @@
                                     {% for category, message in messages %}
                                         <div class="alert alert-{{ 'success' if category == 'success' else category }} alert-dismissible fade show shadow-sm" role="alert">
                                             <i class="bi {{ 'bi-check-circle-fill' if category == 'success' else 'bi-exclamation-triangle-fill' }} me-1"></i>
-                                            {{ message|safe }}
+                                            {# SEGURIDAD: NO agregar |safe aquí. Esta es la única vista
+                                               pública sin login del sistema. Sin |safe, cualquier mensaje
+                                               que sea texto normal se escapa solo (protege contra XSS
+                                               reflejado si algún día se agrega un flash con datos del
+                                               formulario). El mensaje de éxito conserva sus negritas
+                                               porque se construye con Markup() + escape() en app.py
+                                               (ver registro()), y Jinja2 renderiza sin escapar cualquier
+                                               objeto con __html__() aunque no lleve |safe. #}
+                                            {{ message }}
                                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                                         </div>
                                     {% endfor %}

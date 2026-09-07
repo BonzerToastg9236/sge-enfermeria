@@ -45,7 +45,15 @@ class Config:
     # (ver app.py), que sí exige login + rol.
     UPLOAD_FOLDER = os.path.join(basedir, 'instance', 'documentos_alumnos')
     EXTENSIONES_PERMITIDAS = {'pdf', 'jpg', 'jpeg', 'png'}
-    MAX_CONTENT_LENGTH = 8 * 1024 * 1024  # 8 MB por archivo
+    # OJO: Flask/Werkzeug aplica esto al TAMAÑO TOTAL DE LA PETICIÓN, no a
+    # cada archivo por separado -- el formulario de documentos permite subir
+    # hasta 6 archivos de una vez, y lo que se compara contra este límite es
+    # la suma. Al excederlo, Werkzeug corta la petición con un 413 antes de
+    # llegar a la vista (ver el errorhandler(413) en app.py, que lo traduce
+    # a un mensaje entendible). nginx_sge.conf tiene client_max_body_size
+    # 10M, holgadamente por encima, para que el rechazo lo dé la app y no
+    # Nginx con su propia página de error.
+    MAX_CONTENT_LENGTH = 8 * 1024 * 1024  # 8 MB por envío
 
     # --- Seguridad de sesión (login) ---
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)  # Cierra sesión tras 8h de inactividad
@@ -70,6 +78,22 @@ class Config:
     MAIL_SERVER = 'smtp.gmail.com'
     MAIL_PORT = 587
     MAIL_USE_TLS = True
+
+    # Segundos máximos que puede tardar CUALQUIER operación contra el
+    # servidor SMTP (conectar, STARTTLS, login, enviar).
+    #
+    # POR QUÉ EXISTE: Flask-Mail 0.10.0 abre la conexión con
+    # `smtplib.SMTP(server, port)` SIN timeout, y sin timeout smtplib
+    # hereda el default global de sockets, que es esperar PARA SIEMPRE. El
+    # envío del comprobante es síncrono, dentro del flujo de cobro, así que
+    # un Gmail lento o colgado bloquearía al worker de Gunicorn que atiende
+    # ese pago. Con solo 3 workers (deploy/sge.service), dos o tres cobros
+    # simultáneos en ese estado dejan el sistema sin capacidad para nadie.
+    # La app aplica este valor en _ConexionSMTPConTimeout (app.py).
+    #
+    # 10s es holgado: Gmail normalmente responde en menos de 2s. Súbelo
+    # solo si ves fallos de correo en una red lenta.
+    MAIL_TIMEOUT = int(os.environ.get('MAIL_TIMEOUT', 10))
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME')
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD')
     MAIL_DEFAULT_SENDER = ('Control Escolar SGE', os.environ.get('MAIL_USERNAME'))

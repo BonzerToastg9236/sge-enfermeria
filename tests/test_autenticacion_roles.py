@@ -4,6 +4,8 @@ Regla de negocio: Administrativo puede consultar/actualizar; SOLO
 Directivo puede borrar documentos y gestionar usuarios.
 """
 
+import pytest
+
 from tests.conftest import crear_plan, crear_alumno, crear_usuario, login
 from app import RolUsuario
 
@@ -98,3 +100,63 @@ def test_administrativo_no_puede_desactivar_cuentas(client, app):
 
     from app import Usuario, db
     assert db.session.get(Usuario, directivo.id).activo is True  # sigue activo, no se tocó
+
+
+# ---------------------------------------------------------------------------
+# Expediente / Ficha de inscripción: PII y datos médicos del alumno.
+# Regla de negocio explícita (docstring de RolUsuario): CONTADOR "Sin acceso
+# al área de administración de alumnos". DIRECTIVO, ADMINISTRATIVO y
+# CAPTURADOR sí tienen ese acceso.
+# ---------------------------------------------------------------------------
+
+RUTAS_EXPEDIENTE = [
+    '/alumno/{matricula}/expediente',
+    '/alumno/{matricula}/ficha',
+]
+
+
+@pytest.mark.parametrize('ruta', RUTAS_EXPEDIENTE)
+@pytest.mark.parametrize('rol', [
+    RolUsuario.DIRECTIVO,
+    RolUsuario.ADMINISTRATIVO,
+    RolUsuario.CAPTURADOR,
+])
+def test_roles_autorizados_pueden_ver_expediente_y_ficha(client, app, ruta, rol):
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    crear_usuario(username='usuario1', password='clave12345', rol=rol)
+    login(client, 'usuario1', 'clave12345')
+
+    respuesta = client.get(ruta.format(matricula=alumno.matricula_id), follow_redirects=True)
+
+    assert respuesta.status_code == 200
+    assert 'permisos'.encode('utf-8') not in respuesta.data.lower()
+
+
+@pytest.mark.parametrize('ruta', RUTAS_EXPEDIENTE)
+def test_contador_no_puede_ver_expediente_ni_ficha(client, app, ruta):
+    """
+    CONTADOR tiene acceso completo a Cobros pero NINGUNO a la administración
+    de alumnos: el expediente y la ficha de inscripción incluyen CURP,
+    domicilio, contacto de emergencia y alergias/condiciones médicas.
+    """
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+    crear_usuario(username='contador1', password='clave12345', rol=RolUsuario.CONTADOR)
+    login(client, 'contador1', 'clave12345')
+
+    respuesta = client.get(ruta.format(matricula=alumno.matricula_id), follow_redirects=True)
+
+    assert respuesta.status_code == 200  # redirigido a index tras el rechazo
+    assert 'permisos'.encode('utf-8') in respuesta.data.lower()
+
+
+@pytest.mark.parametrize('ruta', RUTAS_EXPEDIENTE)
+def test_sin_sesion_expediente_y_ficha_redirigen_a_login(client, app, ruta):
+    plan = crear_plan()
+    alumno = crear_alumno(plan)
+
+    respuesta = client.get(ruta.format(matricula=alumno.matricula_id), follow_redirects=False)
+
+    assert respuesta.status_code == 302
+    assert '/login' in respuesta.headers['Location']

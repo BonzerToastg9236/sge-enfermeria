@@ -21,6 +21,7 @@ import io
 import logging
 import os
 import re
+import smtplib
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone, timedelta, date, time
 from zoneinfo import ZoneInfo
@@ -126,7 +127,7 @@ from urllib.parse import urlparse
 
 from flask import (
     Flask, render_template, request, flash, redirect, url_for, abort,
-    session, send_file, send_from_directory
+    session, send_file, send_from_directory, current_app
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -137,8 +138,8 @@ from flask_login import (
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_mail import Mail, Message
-from sqlalchemy import UniqueConstraint, CheckConstraint, or_, func
+from flask_mail import Mail, Message, Connection
+from sqlalchemy import UniqueConstraint, CheckConstraint, Index, text, or_, func
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -152,7 +153,58 @@ migrate = Migrate()
 login_manager = LoginManager()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address)
-mail = Mail()
+
+
+# ---------------------------------------------------------------------------
+# CORREO CON TIMEOUT (hallazgo #6 de la auditoría)
+# ---------------------------------------------------------------------------
+# Flask-Mail 0.10.0 abre la conexión con `smtplib.SMTP(server, port)`, SIN
+# timeout y sin ninguna opción de configuración para agregarlo (ver
+# Connection.configure_host() en la librería). Sin timeout, smtplib hereda
+# el default global de sockets: esperar indefinidamente. Como el envío del
+# comprobante es SÍNCRONO dentro del flujo de cobro, un SMTP colgado
+# bloquearía al worker de Gunicorn que atiende ese pago.
+#
+# La única forma de agregarlo sin cambiar de librería ni de arquitectura es
+# sobrescribir ese método. Se replica tal cual el original y solo se agrega
+# `timeout=`. NOTA DE MANTENIMIENTO: esto queda acoplado a la
+# implementación de Flask-Mail 0.10.0 -- si algún día se actualiza la
+# librería, revisar que configure_host() siga teniendo esta forma (o
+# quitar este parche si para entonces ya soporta timeout de fábrica).
+class _ConexionSMTPConTimeout(Connection):
+    def configure_host(self):
+        timeout = current_app.config['MAIL_TIMEOUT']
+
+        if self.mail.use_ssl:
+            host = smtplib.SMTP_SSL(self.mail.server, self.mail.port, timeout=timeout)
+        else:
+            host = smtplib.SMTP(self.mail.server, self.mail.port, timeout=timeout)
+
+        host.set_debuglevel(int(self.mail.debug))
+
+        if self.mail.use_tls:
+            host.starttls()
+
+        if self.mail.username and self.mail.password:
+            host.login(self.mail.username, self.mail.password)
+
+        return host
+
+
+class _CorreoConTimeout(Mail):
+    """Idéntico a Flask-Mail salvo que sus conexiones llevan MAIL_TIMEOUT."""
+
+    def connect(self):
+        app_actual = getattr(self, 'app', None) or current_app
+        try:
+            return _ConexionSMTPConTimeout(app_actual.extensions['mail'])
+        except KeyError as error:
+            raise RuntimeError(
+                'La aplicación no está configurada con Flask-Mail.'
+            ) from error
+
+
+mail = _CorreoConTimeout()
 
 
 # ---------------------------------------------------------------------------
@@ -902,6 +954,21 @@ class Cargo(db.Model):
     generado_por = db.relationship('Usuario')
     concepto_cobro = db.relationship('ConceptoCobro')
 
+    __table_args__ = (
+        # Respaldo en BD de _cargo_duplicado(): un cargo NO cancelado es
+        # único por (alumno, concepto del catálogo, periodo escolar) --
+        # ver migración b7e2c9a41f3d para el razonamiento completo
+        # (por qué es un índice PARCIAL -- excluye CANCELADO -- y por qué
+        # usa COALESCE(periodo_escolar, '') en vez de la columna directa).
+        Index(
+            'uq_cargos_activo_matricula_concepto_periodo',
+            'matricula_fk', 'concepto_cobro_fk', text("COALESCE(periodo_escolar, '')"),
+            unique=True,
+            sqlite_where=text("estatus != 'CANCELADO'"),
+            postgresql_where=text("estatus != 'CANCELADO'"),
+        ),
+    )
+
     def total_pagado(self):
         """Suma solo los pagos NO anulados -- un pago anulado ya no cuenta para el saldo."""
         return sum((p.monto_pagado for p in self.pagos if not p.anulado), Decimal('0.00'))
@@ -1277,11 +1344,47 @@ app = create_app(os.environ.get('FLASK_ENV', 'development'))
 def limite_intentos_excedido(error):
     """
     Se dispara cuando Flask-Limiter bloquea una IP por exceder el límite de
-    intentos de login. En vez del 429 genérico de Werkzeug, mostramos un
-    mensaje claro y regresamos a la pantalla de login.
+    intentos de login o de registro público. En vez del 429 genérico de
+    Werkzeug, mostramos un mensaje claro y regresamos a la pantalla que
+    corresponde.
+
+    El caso de /registro se distingue a propósito: quien se registra es un
+    aspirante SIN cuenta -- mandarlo a /login con el mensaje de "intentos
+    de inicio de sesión" sería desconcertante y no le diría qué hacer.
     """
+    if request.endpoint == 'registro':
+        flash(
+            'Se enviaron demasiadas solicitudes de registro seguidas desde esta '
+            'conexión. Por seguridad, espera unos minutos e inténtalo de nuevo.',
+            'danger'
+        )
+        return redirect(url_for('registro'))
+
     flash('Demasiados intentos de inicio de sesión. Por seguridad, espera un minuto e inténtalo de nuevo.', 'danger')
     return redirect(url_for('login'))
+
+
+@app.errorhandler(413)
+def envio_demasiado_grande(error):
+    """
+    Werkzeug corta la petición cuando excede MAX_CONTENT_LENGTH, ANTES de
+    que la vista corra. Sin este handler, quien sube un documento pesado
+    ve la página cruda de error 413 y pierde lo que había capturado en el
+    formulario, sin entender por qué.
+
+    El destino se arma con la RUTA del referer (nunca el referer completo):
+    así es imposible que alguien lo use para un redirect a un sitio externo.
+    """
+    limite_mb = app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)
+    flash(
+        f'El envío es demasiado grande (máximo {limite_mb} MB en total por envío, '
+        f'sumando todos los archivos). Sube los documentos de uno en uno, o '
+        f'escanéalos con menor resolución.',
+        'danger'
+    )
+
+    ruta_previa = urlparse(request.referrer or '').path
+    return redirect(ruta_previa if ruta_previa.startswith('/') else url_for('index'))
 
 
 @app.errorhandler(404)
@@ -1823,6 +1926,7 @@ def crear_alumno_generando_matricula(plan: 'PlanEstudio', intentos_maximos: int 
 
 
 @app.route('/registro', methods=['GET', 'POST'])
+@limiter.limit('20 per hour;5 per minute', methods=['POST'])
 def registro():
     planes = PlanEstudio.query.filter_by(activo=True).order_by(PlanEstudio.nombre.asc()).all()
 
@@ -2264,6 +2368,54 @@ def extension_permitida(nombre_archivo: str) -> bool:
     )
 
 
+# Firma real (magic bytes) de cada formato aceptado en el expediente.
+#
+# SECURITY-NOTE (hallazgo #7): la extensión del nombre la elige quien sube
+# el archivo, así que por sí sola no prueba nada -- cualquier contenido
+# (un .exe, un HTML con <script>) pasaba con solo llamarlo "documento.pdf".
+# Estos son los primeros bytes que TODO archivo de ese formato lleva por
+# definición del estándar, y no se pueden falsificar sin dejar de ser un
+# archivo válido de ese tipo.
+#
+# Se comprueban a mano en vez de usar python-magic: esa librería necesita
+# libmagic (un paquete del sistema operativo, dependencia nueva en el VPS)
+# y aquí solo hay 3 formatos, todos con firma fija al inicio.
+FIRMAS_POR_EXTENSION = {
+    'pdf': (b'%PDF-',),
+    'png': (b'\x89PNG\r\n\x1a\n',),
+    'jpg': (b'\xff\xd8\xff',),
+    'jpeg': (b'\xff\xd8\xff',),
+}
+
+BYTES_DE_FIRMA = 8  # Suficiente para la firma más larga (PNG)
+
+
+def contenido_coincide_con_extension(archivo) -> bool:
+    """
+    True solo si los primeros bytes del archivo corresponden de verdad al
+    formato que anuncia su extensión.
+
+    Se exige coherencia (no basta con que el contenido sea "alguno de los
+    permitidos"): el archivo se sirve después con el Content-Type derivado
+    de su extensión, y con `X-Content-Type-Options: nosniff` activo en
+    Nginx el navegador NO adivina -- un PNG guardado como .pdf
+    simplemente no se vería. Mejor rechazarlo al subirlo, con un mensaje
+    claro, que descubrirlo el día que alguien necesite el documento.
+
+    Deja el puntero del archivo al inicio: si no se rebobina, el
+    archivo.save() posterior guardaría el contenido truncado.
+    """
+    extension = archivo.filename.rsplit('.', 1)[1].lower() if '.' in archivo.filename else ''
+    firmas = FIRMAS_POR_EXTENSION.get(extension)
+    if not firmas:
+        return False
+
+    inicio = archivo.read(BYTES_DE_FIRMA)
+    archivo.seek(0)
+
+    return any(inicio.startswith(firma) for firma in firmas)
+
+
 # Mapeo de <name> del <input type="file"> -> TipoDocumento correspondiente
 CAMPOS_DOCUMENTOS = {
     'archivo_domicilio': TipoDocumento.COMPROBANTE_DOMICILIO,
@@ -2309,6 +2461,18 @@ def documentos(matricula):
                 flash(
                     f'El archivo de "{tipo_doc.value}" tiene un formato no permitido '
                     f'(solo PDF, JPG o PNG).',
+                    'danger'
+                )
+                continue
+
+            # La extensión la escribe quien sube el archivo; los bytes no
+            # mienten. Se valida ANTES de escribir nada en disco.
+            if not contenido_coincide_con_extension(archivo):
+                flash(
+                    f'El archivo de "{tipo_doc.value}" no se guardó: su contenido real '
+                    f'no coincide con su extensión (no es un PDF/JPG/PNG válido). '
+                    f'Si lo renombraste a mano, vuelve a exportarlo o escanearlo en el '
+                    f'formato correcto.',
                     'danger'
                 )
                 continue
@@ -2423,7 +2587,7 @@ def eliminar_documento(doc_id):
 # ---------------------------------------------------------------------------
 
 @app.route('/alumno/<matricula>/expediente')
-@login_required
+@rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
 def ver_expediente(matricula):
     alumno = db.get_or_404(Alumno, matricula)
 
@@ -2468,7 +2632,7 @@ def ver_expediente(matricula):
 
 
 @app.route('/alumno/<matricula>/ficha')
-@login_required
+@rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
 def ficha_inscripcion(matricula):
     """
     Ficha de Inscripción imprimible (frente + reverso), a partir de los
@@ -2554,13 +2718,29 @@ def cambiar_estatus(matricula):
 
     cargos_auto_generados = []
     materias_auto_inscritas = []
+    avisos_de_configuracion = []
     if nuevo_estatus == EstatusAlumno.ACTIVO and not alumno.fecha_validacion:
         alumno.fecha_validacion = ahora_utc()
-        cargos_auto_generados = _generar_cargos_de_inscripcion(alumno)
+        cargos_auto_generados, avisos_de_configuracion = _generar_cargos_de_inscripcion(alumno)
         materias_auto_inscritas = _generar_carga_academica(alumno)
 
     db.session.add(registro)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # CONCURRENCIA: _cargo_duplicado() ya se revisó arriba (dentro de
+        # _generar_cargos_de_inscripcion()), pero eso es solo un check en
+        # Python -- la garantía real es el índice único de la BD (ver
+        # migración b7e2c9a41f3d). Si dos peticiones activan al mismo
+        # alumno casi al mismo tiempo, una gana y la otra cae aquí.
+        db.session.rollback()
+        flash(
+            'No se pudo actualizar el estatus: ya se generó un cargo con la misma '
+            'clave (alumno + concepto + periodo) justo ahora, probablemente por '
+            'otra operación al mismo tiempo. Vuelve a intentarlo.',
+            'danger'
+        )
+        return redirect(url_for('ver_expediente', matricula=matricula))
 
     flash(f'Estatus del alumno actualizado a "{nuevo_estatus.value}".', 'success')
     if cargos_auto_generados:
@@ -2576,6 +2756,9 @@ def cambiar_estatus(matricula):
             f'({len(materias_auto_inscritas)} materia(s)). Puedes verla en Carga Académica.',
             'success'
         )
+    # Falta configuración de precios: no se inventa un monto, se dice qué falta.
+    for aviso in avisos_de_configuracion:
+        flash(aviso, 'warning')
     return redirect(url_for('ver_expediente', matricula=matricula))
 
 
@@ -2585,15 +2768,30 @@ def avanzar_cuatrimestre(matricula):
     """Avanza a UN alumno al siguiente cuatrimestre -- para casos sueltos (ej. alguien que regresó de Baja Temporal)."""
     alumno = db.get_or_404(Alumno, matricula)
 
-    ok, mensaje, cargos, materias = _avanzar_cuatrimestre(alumno)
+    ok, mensaje, cargos, materias, avisos_de_configuracion = _avanzar_cuatrimestre(alumno)
 
     if ok:
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # CONCURRENCIA: mismo caso que cambiar_estatus() -- ver migración
+            # b7e2c9a41f3d.
+            db.session.rollback()
+            flash(
+                'No se pudo avanzar de cuatrimestre: ya se generó un cargo con la '
+                'misma clave (alumno + concepto + periodo) justo ahora, '
+                'probablemente por otra operación al mismo tiempo. Vuelve a '
+                'intentarlo.',
+                'danger'
+            )
+            return redirect(url_for('ver_expediente', matricula=matricula))
         flash(mensaje, 'success')
         if cargos:
             flash(f'Se generaron {len(cargos)} cargo(s) nuevo(s). Revísalos en Cobros.', 'success')
         if materias:
             flash(f'Se generó su carga académica del {alumno.cuatrimestre_actual}° cuatrimestre ({len(materias)} materia(s)).', 'success')
+        for aviso in avisos_de_configuracion:
+            flash(aviso, 'warning')
     else:
         db.session.rollback()
         flash(mensaje, 'danger')
@@ -2783,7 +2981,11 @@ def _monto_mensualidad_con_beca(alumno, periodo_cargo):
     descuento (nunca se suman varias becas entre sí).
     """
     monto_base = alumno.plan.monto_mensualidad
-    if not monto_base:
+    # `is None` a propósito, NO `not monto_base`: una mensualidad de $0.00
+    # es un precio CONFIGURADO (la institución decidió que esa carrera es
+    # gratuita), mientras que NULL significa "todavía no se captura". Ver
+    # _generar_cargos_de_periodo().
+    if monto_base is None:
         return None
 
     becas_vigentes = [b for b in alumno.becas if b.activa and periodo_cargo.startswith(b.periodo_escolar)]
@@ -2806,27 +3008,52 @@ def _generar_cargos_de_periodo(alumno, nombre_concepto_unico):
     El resto de conceptos (Uniformes, Servicio Social, etc.) se siguen
     agregando a mano. Nunca duplica: reutiliza _cargo_duplicado() antes
     de crear cada cargo.
+
+    LOS PRECIOS SON CONFIGURACIÓN DE LA INSTITUCIÓN, y esta función NUNCA
+    los inventa. `ConceptoCobro.monto_sugerido` y
+    `PlanEstudio.monto_mensualidad` son nullable a propósito: NULL
+    significa "esta institución todavía no capturó ese precio", que NO es
+    lo mismo que $0.00 (eso sería "es gratis", una decisión que solo
+    Dirección puede tomar desde su pantalla de configuración). Si falta el
+    precio no se genera el cargo: se devuelve el aviso para que la persona
+    sepa exactamente qué configuración falta y dónde capturarla.
+
+    Devuelve (cargos_generados, avisos_de_configuracion).
     """
     periodo_actual = periodo_escolar_actual()
     vencimiento_default = datetime.strptime(_vencimiento_dia_10_sugerido(), '%Y-%m-%d').date()
     cargos_generados = []
+    avisos_de_configuracion = []
 
     concepto_unico = ConceptoCobro.query.filter_by(nombre=nombre_concepto_unico, activo=True).first()
     if concepto_unico and not _cargo_duplicado(alumno.matricula_id, concepto_unico.id, periodo_actual):
-        cargo = Cargo(
-            matricula_fk=alumno.matricula_id,
-            concepto_cobro_fk=concepto_unico.id,
-            concepto=concepto_unico.nombre,
-            monto=concepto_unico.monto_sugerido or Decimal('0.00'),
-            periodo_escolar=periodo_actual,
-            fecha_vencimiento=vencimiento_default,
-            estatus=EstatusCargo.PENDIENTE,
-        )
-        db.session.add(cargo)
-        cargos_generados.append(cargo)
+        if concepto_unico.monto_sugerido is None:
+            avisos_de_configuracion.append(
+                f'No se generó el cargo de "{concepto_unico.nombre}": ese concepto todavía '
+                'no tiene precio configurado en el catálogo de la institución. Captúralo en '
+                'Conceptos de Cobro y genera el cargo desde la pantalla de Cobros.'
+            )
+        else:
+            cargo = Cargo(
+                matricula_fk=alumno.matricula_id,
+                concepto_cobro_fk=concepto_unico.id,
+                concepto=concepto_unico.nombre,
+                monto=concepto_unico.monto_sugerido,
+                periodo_escolar=periodo_actual,
+                fecha_vencimiento=vencimiento_default,
+                estatus=EstatusCargo.PENDIENTE,
+            )
+            db.session.add(cargo)
+            cargos_generados.append(cargo)
 
     concepto_mensualidad = ConceptoCobro.query.filter_by(es_mensualidad=True, activo=True).first()
-    if concepto_mensualidad and alumno.plan.monto_mensualidad:
+    if concepto_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
+        avisos_de_configuracion.append(
+            f'No se generaron los cargos de mensualidad: la carrera '
+            f'"{alumno.plan.nombre if alumno.plan else "(sin plan)"}" todavía no tiene '
+            'mensualidad configurada. Captúrala en Mensualidades por Carrera.'
+        )
+    elif concepto_mensualidad:
         for anio, mes in _meses_del_cuatrimestre_actual():
             etiqueta_mes = f'{periodo_actual}-{MESES_ES[mes]}'  # Ej. "2026-B-May" -- único por mes, cabe en 20 caracteres
             if _cargo_duplicado(alumno.matricula_id, concepto_mensualidad.id, etiqueta_mes):
@@ -2843,16 +3070,24 @@ def _generar_cargos_de_periodo(alumno, nombre_concepto_unico):
             db.session.add(cargo)
             cargos_generados.append(cargo)
 
-    return cargos_generados
+    return cargos_generados, avisos_de_configuracion
 
 
 def _generar_cargos_de_inscripcion(alumno):
-    """Al activar a un alumno por PRIMERA vez: cargo de Inscripción + mensualidades del cuatrimestre en curso."""
+    """
+    Al activar a un alumno por PRIMERA vez: cargo de Inscripción +
+    mensualidades del cuatrimestre en curso. Devuelve
+    (cargos_generados, avisos_de_configuracion).
+    """
     return _generar_cargos_de_periodo(alumno, 'Inscripción')
 
 
 def _generar_cargos_de_reinscripcion(alumno):
-    """Al avanzarlo de cuatrimestre: cargo de Reinscripción + mensualidades del nuevo cuatrimestre en curso."""
+    """
+    Al avanzarlo de cuatrimestre: cargo de Reinscripción + mensualidades
+    del nuevo cuatrimestre en curso. Devuelve
+    (cargos_generados, avisos_de_configuracion).
+    """
     return _generar_cargos_de_periodo(alumno, 'Reinscripción')
 
 
@@ -2900,28 +3135,31 @@ def _avanzar_cuatrimestre(alumno):
     por primera vez), y su nueva carga académica -- reutilizando los
     mismos helpers, así que nunca duplica nada.
 
-    Devuelve (ok, mensaje, cargos_generados, materias_generadas).
+    Devuelve (ok, mensaje, cargos_generados, materias_generadas,
+    avisos_de_configuracion) -- lo último es lo que haga falta capturar en
+    la configuración de precios de la institución (ver
+    _generar_cargos_de_periodo()).
     No avanza (ok=False) si el alumno no está Activo, o si ya está en el
     último cuatrimestre configurado.
     """
     max_cuatri = _max_periodos()
 
     if alumno.estatus != EstatusAlumno.ACTIVO:
-        return False, f'{alumno.nombre_completo} no está Activo (está en "{alumno.estatus.value}"), no se puede avanzar.', [], []
+        return False, f'{alumno.nombre_completo} no está Activo (está en "{alumno.estatus.value}"), no se puede avanzar.', [], [], []
 
     if alumno.cuatrimestre_actual >= max_cuatri:
-        return False, f'{alumno.nombre_completo} ya está en el último cuatrimestre configurado ({max_cuatri}°).', [], []
+        return False, f'{alumno.nombre_completo} ya está en el último cuatrimestre configurado ({max_cuatri}°).', [], [], []
 
     alumno.cuatrimestre_actual += 1
 
-    cargos_generados = _generar_cargos_de_reinscripcion(alumno)
+    cargos_generados, avisos_de_configuracion = _generar_cargos_de_reinscripcion(alumno)
 
     # _generar_carga_academica() lee alumno.cuatrimestre_actual, que ya
     # quedó incrementado arriba -- por eso genera la del cuatrimestre NUEVO.
     materias_generadas = _generar_carga_academica(alumno)
 
     mensaje = f'{alumno.nombre_completo} avanzó al {alumno.cuatrimestre_actual}° cuatrimestre.'
-    return True, mensaje, cargos_generados, materias_generadas
+    return True, mensaje, cargos_generados, materias_generadas, avisos_de_configuracion
 
 
 @app.route('/alumno/<matricula>/cobros/nuevo', methods=['POST'])
@@ -2988,10 +3226,43 @@ def nuevo_cargo(matricula):
         generado_por_fk=current_user.id,
     )
     db.session.add(nuevo)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # CONCURRENCIA: _cargo_duplicado() de arriba ya no es la única
+        # protección -- el índice único de la BD (migración b7e2c9a41f3d)
+        # es la garantía real. Esto es lo que atrapa el caso donde dos
+        # peticiones pasaron el check en Python casi al mismo tiempo (ej.
+        # doble clic, o dos personas de ventanilla capturando el mismo
+        # cargo) y solo una puede ganar la carrera del INSERT.
+        db.session.rollback()
+        flash(
+            f'Ya existe un cargo de "{concepto_cobro.nombre}"'
+            f'{" para el periodo " + periodo_escolar if periodo_escolar else ""} '
+            'sin cancelar -- se generó justo ahora, probablemente por un doble '
+            'clic o dos personas capturando al mismo tiempo. No se creó otro.',
+            'warning'
+        )
+        return redirect(url_for('cobros', matricula=matricula))
 
     flash(f'Cargo "{concepto_cobro.nombre}" agregado correctamente.', 'success')
     return redirect(url_for('cobros', matricula=matricula))
+
+
+# SECURITY-NOTE: lo que se le dice al personal cuando falla un envío.
+# Antes se devolvía str(error), y ese texto se mostraba tal cual en el
+# flash del cobro y en la lista de recordatorios fallidos. Una excepción
+# de smtplib puede traer el host del servidor de correo, la cuenta usada
+# y códigos internos: información de infraestructura que no le sirve a
+# quien está cobrando en ventanilla y que no debe quedar en pantalla.
+# El detalle completo NO se pierde -- va al log del servidor con
+# app.logger.warning(..., exc_info=True), que es donde lo necesita quien
+# administra el VPS (logs/sge.log, ver create_app).
+MOTIVO_GENERICO_FALLO_CORREO = (
+    'No se pudo conectar con el servidor de correo. Revisa la conexión a internet '
+    'o la configuración de correo del sistema; el detalle técnico quedó en el log '
+    'del servidor.'
+)
 
 
 def enviar_comprobante_pago(alumno, cargo, pago):
@@ -3022,8 +3293,12 @@ def enviar_comprobante_pago(alumno, cargo, pago):
         )
         mail.send(mensaje)
         return True, None
-    except Exception as error:
-        return False, str(error)
+    except Exception:
+        app.logger.warning(
+            'Falló el envío del comprobante del pago %s (cargo %s, alumno %s).',
+            pago.id, cargo.id, alumno.matricula_id, exc_info=True
+        )
+        return False, MOTIVO_GENERICO_FALLO_CORREO
 
 
 DIAS_AVISO_VENCIMIENTO = 3  # Manda el recordatorio cuando falten esta cantidad de días (o menos) para vencer
@@ -3051,14 +3326,33 @@ def enviar_recordatorio_vencimiento(alumno, cargo):
         )
         mail.send(mensaje)
         return True, None
-    except Exception as error:
-        return False, str(error)
+    except Exception:
+        app.logger.warning(
+            'Falló el envío del recordatorio de vencimiento del cargo %s (alumno %s).',
+            cargo.id, alumno.matricula_id, exc_info=True
+        )
+        return False, MOTIVO_GENERICO_FALLO_CORREO
 
 
 @app.route('/cobro/<int:cargo_id>/pagar', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def registrar_pago(cargo_id):
-    cargo = db.get_or_404(Cargo, cargo_id)
+    # CONCURRENCIA: el saldo (monto + recargo_aplicado - pagos) vive en la
+    # fila Cargo, así que es ESA fila la que hay que bloquear -- no la de
+    # Pago, que todavía no existe en este punto. with_for_update() obliga
+    # a que una segunda petición sobre el MISMO cargo espere a que esta
+    # transacción termine (commit incluido) antes de poder leer su propio
+    # saldo, así que lo ve ya actualizado en vez de leer el mismo saldo
+    # "viejo" que esta transacción. Mismo patrón que generar_matricula()/
+    # siguiente_folio() (ver esas funciones): with_for_update() solo bloquea
+    # de verdad en motores que lo soportan (PostgreSQL, producción); en
+    # SQLite (desarrollo) se ignora silenciosamente, no hay bloqueo por fila.
+    consulta_cargo = Cargo.query.filter_by(id=cargo_id)
+    if db.engine.dialect.name != 'sqlite':
+        consulta_cargo = consulta_cargo.with_for_update()
+    cargo = consulta_cargo.first()
+    if cargo is None:
+        abort(404)
 
     if cargo.estatus == EstatusCargo.CANCELADO:
         flash('Este cargo está cancelado; no se le pueden registrar pagos.', 'danger')
@@ -3810,7 +4104,29 @@ def generar_mensualidades():
             db.session.add(nuevo)
             generados.append(alumno)
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # CONCURRENCIA: todo el lote se hace en una sola transacción, así
+            # que si CUALQUIER cargo del lote choca con el índice único
+            # (migración b7e2c9a41f3d) -- ej. alguien ya generó ese mismo
+            # cargo a mano, o el botón se apretó dos veces -- se descarta el
+            # lote COMPLETO (nunca queda a medias) y se pide reintentar; al
+            # reintentar, _cargo_duplicado() ya va a omitir solo los que de
+            # verdad ya existan.
+            db.session.rollback()
+            flash(
+                'No se generó el lote: alguno de estos cargos ya se generó justo '
+                'ahora por otra operación (ej. el botón se apretó dos veces). '
+                'Vuelve a intentarlo -- los que ya existan se omitirán solos.',
+                'danger'
+            )
+            return render_template(
+                'generar_mensualidades.html',
+                conceptos=conceptos_activos,
+                periodo_escolar_sugerido=periodo_escolar_actual(),
+                vencimiento_sugerido=_vencimiento_dia_10_sugerido(),
+            )
 
         flash(
             f'Se generaron {len(generados)} cargo(s) de "{concepto_cobro.nombre}" - {periodo_escolar}. '
@@ -3860,20 +4176,43 @@ def avanzar_cuatrimestre_lote():
 
         avanzados = []
         omitidos = []
+        # Configuración de precios que falta. Se junta SIN repetir: si a 40
+        # alumnos les falta el mismo precio, es un solo problema de
+        # configuración, no 40 avisos en pantalla.
+        avisos_de_configuracion = []
         for alumno in alumnos:
-            ok, mensaje, cargos, materias = _avanzar_cuatrimestre(alumno)
+            ok, mensaje, cargos, materias, avisos = _avanzar_cuatrimestre(alumno)
             if ok:
                 avanzados.append({'alumno': alumno, 'cargos': len(cargos), 'materias': len(materias)})
             else:
                 omitidos.append({'alumno': alumno, 'motivo': mensaje})
+            for aviso in avisos:
+                if aviso not in avisos_de_configuracion:
+                    avisos_de_configuracion.append(aviso)
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # CONCURRENCIA: mismo caso que generar_mensualidades() -- todo el
+            # lote es una sola transacción; si algún cargo choca con el
+            # índice único (migración b7e2c9a41f3d) se descarta el lote
+            # COMPLETO (nunca a medias) y se pide reintentar.
+            db.session.rollback()
+            flash(
+                'No se aplicó el avance de cuatrimestre: alguno de estos cargos '
+                'ya se generó justo ahora por otra operación. Vuelve a '
+                'intentarlo -- los que ya estén al día se omitirán solos.',
+                'danger'
+            )
+            return render_template('avanzar_cuatrimestre.html', planes=planes, max_cuatrimestres=max_cuatri)
 
         flash(
             f'{len(avanzados)} alumno(s) avanzaron al {cuatrimestre_actual + 1}° cuatrimestre. '
             f'{len(omitidos)} se omitieron (ver detalle abajo).',
             'success' if avanzados else 'warning'
         )
+        for aviso in avisos_de_configuracion:
+            flash(aviso, 'warning')
         return render_template(
             'avanzar_cuatrimestre.html',
             planes=planes,

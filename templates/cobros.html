@@ -249,7 +249,13 @@
                                         </div>
                                     {% endif %}
 
-                                    {% if cargo.estatus.name not in ('PAGADO', 'CANCELADO') %}
+                                    {# El formulario solo tiene sentido si de verdad hay algo por
+                                       cobrar. Con saldo 0 el input quedaba con min="0.01" y
+                                       max="0.00" -- un botón imposible de usar -- y el backend
+                                       (registrar_pago) ya rechazaba ambos casos: monto <= 0 por
+                                       inválido, y cualquier monto positivo por exceder el saldo.
+                                       Esta condición alinea la vista con esa regla del backend. #}
+                                    {% if cargo.estatus.name not in ('PAGADO', 'CANCELADO') and cargo.saldo_pendiente() > 0 %}
                                         <form action="{{ url_for('registrar_pago', cargo_id=cargo.id) }}" method="POST" class="row g-2 align-items-end mt-3">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <div class="col-md-3">
@@ -274,6 +280,24 @@
                                                 </button>
                                             </div>
                                         </form>
+                                    {% elif cargo.estatus.name not in ('PAGADO', 'CANCELADO') and cargo.monto == 0 %}
+                                        {# No se oculta el problema en silencio: se dice por qué no
+                                           hay nada que cobrar. Un cargo nace en $0 cuando su
+                                           concepto del catálogo todavía no tiene precio capturado
+                                           (ConceptoCobro.monto_sugerido vacío). #}
+                                        <div class="alert alert-warning small mt-3 mb-0">
+                                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                            Este cargo se generó en <strong>$0.00</strong> porque el concepto
+                                            "{{ cargo.concepto }}" no tenía precio configurado en el catálogo.
+                                            No hay nada que cobrar todavía.
+                                            {% if current_user.es_directivo() %}
+                                                Captura el precio en
+                                                <a href="{{ url_for('conceptos_cobro') }}">Conceptos de Cobro</a>
+                                                y genera de nuevo el cargo con el monto correcto.
+                                            {% else %}
+                                                Pídele a Dirección que capture el precio del concepto.
+                                            {% endif %}
+                                        </div>
                                     {% endif %}
 
                                     {% if current_user.es_directivo() and cargo.recargo_aplicado > 0 and cargo.estatus.name != 'CANCELADO' %}
