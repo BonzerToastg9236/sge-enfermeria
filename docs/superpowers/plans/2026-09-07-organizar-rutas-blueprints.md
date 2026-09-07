@@ -18,7 +18,7 @@
 - Do not undo fixes #1–#9 from the production audit (role guard on `ver_expediente`/`ficha_inscripcion`, the `with_for_update()` row lock in `registrar_pago`, the partial unique index on `Cargo`, the `/registro` rate limit, the endpoint-aware 429 handler, `MAIL_TIMEOUT`, magic-bytes file validation, the 413 handler, `MOTIVO_GENERICO_FALLO_CORREO`). Every task that touches one of these is flagged explicitly.
 - None of the 166 existing tests are modified. If a task appears to require editing one, stop — that means the task broke compatibility; fix the task, not the test.
 - `app.py` keeps re-exporting the 34 names listed in Appendix A, so `tests/`, `seed.py` and `crear_admin.py` keep working unmodified.
-- Run the full test suite (`./venv/bin/python -m pytest -q`) after every task and confirm the count only grows (166 at Task 0 start, 168 from Task 0 onward). A task is not done while any test is red.
+- Run the full test suite (`./venv/bin/python -m pytest -q`) after every task and confirm the count only grows (166 at Task 0 start, 169 from Task 0 onward (Task 0 adds 3 new test functions: 1 in test_integridad_urls.py + 2 in test_inventario_rutas.py)). A task is not done while any test is red.
 - Every commit message ends with the required attribution footer (see repo convention already in use).
 - **Every `app.py:X-Y` line reference in this plan is anchored to the frozen baseline snapshot described immediately below — never to the live, currently-mutating `app.py`.** Deleting lines in one step shifts every later line number in the file; without a frozen reference, later tasks' line numbers silently go stale.
 
@@ -365,7 +365,7 @@ baseline snapshot, not a red test.
 - [ ] **Step 5: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed` (166 existing + 2 new).
+Expected: `169 passed` (166 existing + 3 new: 1 in test_integridad_urls.py + 2 in test_inventario_rutas.py).
 
 - [ ] **Step 6: Commit**
 
@@ -529,7 +529,7 @@ where it's actually used.
 - [ ] **Step 4: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -880,7 +880,7 @@ it confirms "no changes").
 - [ ] **Step 8: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 9: Commit**
 
@@ -1110,7 +1110,7 @@ registration call stays in `app.py`, only the function bodies moved.
 - [ ] **Step 9: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 10: Commit**
 
@@ -1412,7 +1412,7 @@ from servicios.correo import (
 - [ ] **Step 9: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically the two tests tied to fixes touched in this task:
 `./venv/bin/python -m pytest tests/test_correo_timeout.py tests/test_errores_smtp_no_expuestos.py tests/test_precios_por_institucion.py tests/test_cargos_duplicados.py -v`
@@ -1548,7 +1548,7 @@ Change exactly these 3 rows' 3rd field (endpoint), nothing else:
 - [ ] **Step 7: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`. Also explicitly:
+Expected: `169 passed`. Also explicitly:
 `./venv/bin/python -m pytest tests/test_integridad_urls.py tests/test_inventario_rutas.py tests/test_autenticacion_roles.py -v`
 Expected: all pass.
 
@@ -1650,7 +1650,7 @@ correctly excludes from matching the old bare form).
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 7: Commit**
 
@@ -1762,7 +1762,7 @@ rather than folded into a blanket `sed`).
 - [ ] **Step 7: Run the full suite, with special attention to rate-limit tests**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_rate_limit_registro.py tests/test_xss_mensajes_registro.py tests/test_registro_publico.py -v`
 Expected: all pass — these three files directly exercise fixes #4 and
@@ -1888,7 +1888,7 @@ itself must never appear inside a `url_for(...)` string.
 - [ ] **Step 6: Run the full suite, with special attention to file validation**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_validacion_archivos.py -v`
 Expected: all pass — this is the fix #7 test file, exercising exactly
@@ -2043,7 +2043,7 @@ re-run the verification grep anyway rather than assuming.
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_escudo_plan_estudios.py -v`
 Expected: all pass — this file exercises the "Escudo del Plan de
@@ -2210,7 +2210,7 @@ appears as a prefix of the other two names).
 - [ ] **Step 6: Run the full suite, with special attention to the pricing rules**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_precios_por_institucion.py tests/test_recargos_y_conceptos.py tests/test_configuracion_institucion.py -v`
 Expected: all pass, including the 3 role-restriction tests
@@ -2355,7 +2355,7 @@ Expected: no output.
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 7: Commit**
 
@@ -2595,7 +2595,7 @@ rename in this whole plan that reads unusually and is worth eyeballing.
 - [ ] **Step 7: Run the full suite, with mandatory focus on the concurrency test**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically:
 `./venv/bin/python -m pytest tests/test_concurrencia_pagos.py tests/test_cargos_duplicados.py tests/test_cargos_saldo_cero.py tests/test_correo_timeout.py tests/test_errores_smtp_no_expuestos.py -v`
@@ -2816,7 +2816,7 @@ inside `url_for('avanzar_cuatrimestre_lote'` because character 24 differs,
 - [ ] **Step 7: Run the full suite, with mandatory focus on fix #1's test**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically:
 `./venv/bin/python -m pytest tests/test_autenticacion_roles.py tests/test_matricula.py tests/test_registro_publico.py -v`
@@ -2979,7 +2979,7 @@ Expected: the `rm` succeeds; the `grep` afterward returns nothing (confirms it w
 - [ ] **Step 8: Full suite, one final time**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`, zero warnings, zero skips beyond what already
+Expected: `169 passed`, zero warnings, zero skips beyond what already
 existed before this plan (there were none).
 
 - [ ] **Step 9: Manual smoke test — app actually starts**
