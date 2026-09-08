@@ -42,8 +42,7 @@ from flask_login import (
     UserMixin, login_user, logout_user,
     login_required, current_user
 )
-from flask_mail import Message
-from sqlalchemy import UniqueConstraint, CheckConstraint, Index, text, or_, func
+from sqlalchemy import UniqueConstraint, CheckConstraint, Index, text, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -72,6 +71,25 @@ from modelos import (
     EstatusCargo, MetodoPago, TipoRecargo, TipoDescuentoBeca,
     ConceptoCobro, Beca, ConfiguracionCobros, ConfiguracionInstitucion,
     Cargo, Pago, ContadorFolio,
+)
+from servicios.matriculas import generar_matricula, crear_alumno_generando_matricula
+from servicios.alumnos import _matriculas_con_adeudo, calcular_estadisticas_alumnos
+from servicios.cobros import (
+    _cargo_duplicado, _meses_del_cuatrimestre_actual, _monto_mensualidad_con_beca,
+    _generar_cargos_de_periodo, _generar_cargos_de_inscripcion,
+    _generar_cargos_de_reinscripcion, MESES_ES, _vencimiento_dia_10_sugerido,
+)
+from servicios.academico import (
+    _max_periodos, _generar_carga_academica, _avanzar_cuatrimestre,
+    _registrar_historial_calificacion, _siguiente_numero_acta,
+)
+from servicios.reportes import (
+    _calcular_reporte_cobros_del_dia, _calcular_cartera_vencida,
+    _rango_ultimos_n_meses, _calcular_dashboard_cobros,
+)
+from servicios.correo import (
+    MOTIVO_GENERICO_FALLO_CORREO, enviar_comprobante_pago,
+    DIAS_AVISO_VENCIMIENTO, enviar_recordatorio_vencimiento,
 )
 
 
@@ -483,61 +501,6 @@ def toggle_usuario(user_id):
 # Pantalla principal de uso exclusivo de Control Escolar.
 # ---------------------------------------------------------------------------
 
-def _matriculas_con_adeudo():
-    """
-    Devuelve el conjunto de matrículas con saldo pendiente > 0, calculado
-    con UNA agregación en SQL (subquery de pagos por cargo) en vez de
-    cargar cada Alumno y cada Cargo/Pago en Python.
-
-    PERFORMANCE-NOTE: la versión anterior hacía Alumno.query.join(Cargo)...all()
-    y luego, para cada alumno, tiene_adeudo() -> saldo_total_adeudado(),
-    que a su vez recorre alumno.cargos y, por cada cargo, cargo.pagos
-    (ambos lazy='select'). Con pocos alumnos no se nota, pero es un
-    patrón N+1 clásico: con miles de alumnos con adeudo, cada carga del
-    dashboard dispara cientos/miles de consultas adicionales. Esta versión
-    hace el cálculo en 1 sola consulta agregada, sin importar cuántos
-    alumnos existan.
-    """
-    pagos_por_cargo = (
-        db.session.query(
-            Pago.cargo_fk,
-            func.coalesce(func.sum(Pago.monto_pagado), 0).label('total_pagado')
-        )
-        .filter(Pago.anulado.is_(False))  # Un pago anulado ya no cuenta para el saldo
-        .group_by(Pago.cargo_fk)
-        .subquery()
-    )
-
-    saldo_expr = (
-        Cargo.monto + Cargo.recargo_aplicado
-        - func.coalesce(pagos_por_cargo.c.total_pagado, 0)
-    )
-
-    filas = (
-        db.session.query(Cargo.matricula_fk, func.sum(saldo_expr).label('saldo'))
-        .outerjoin(pagos_por_cargo, pagos_por_cargo.c.cargo_fk == Cargo.id)
-        .filter(Cargo.estatus != EstatusCargo.CANCELADO)
-        .group_by(Cargo.matricula_fk)
-        .having(func.sum(saldo_expr) > 0)
-        .all()
-    )
-    return {matricula for matricula, _saldo in filas}
-
-
-def calcular_estadisticas_alumnos():
-    """Números clave para el panel del buscador (pantalla de inicio)."""
-    con_adeudo = len(_matriculas_con_adeudo())
-
-    return {
-        'total': Alumno.query.count(),
-        'pendientes': Alumno.query.filter_by(estatus=EstatusAlumno.PENDIENTE).count(),
-        'activos': Alumno.query.filter_by(estatus=EstatusAlumno.ACTIVO).count(),
-        'documentacion_incompleta': Alumno.query.filter(Alumno.documentacion_pendiente.isnot(None)).count(),
-        'faltas': Alumno.query.filter(Alumno.faltas_administrativas.isnot(None)).count(),
-        'con_adeudo': con_adeudo,
-    }
-
-
 @app.context_processor
 def inyectar_configuracion_institucion():
     """
@@ -549,16 +512,6 @@ def inyectar_configuracion_institucion():
     otro nivel educativo, solo cambiando esta configuración.
     """
     return {'config_institucion': ConfiguracionInstitucion.obtener()}
-
-
-def _max_periodos() -> int:
-    """
-    Tope de periodos (cuatrimestres/grados/semestres/lo que sea) según
-    la configuración de la institución -- reemplaza al antiguo
-    _max_periodos(), que era un número fijo en
-    config.py y no se podía ajustar por tipo de escuela sin editar código.
-    """
-    return ConfiguracionInstitucion.obtener().max_periodos
 
 
 # --- Paginación -------------------------------------------------------------
@@ -674,82 +627,6 @@ def buscar():
 # ---------------------------------------------------------------------------
 # MÓDULO DE AUTO-REGISTRO PÚBLICO
 # ---------------------------------------------------------------------------
-
-def generar_matricula(plan: 'PlanEstudio') -> str:
-    """
-    Genera la matrícula siguiente para un plan dado, con el formato:
-        <CLAVE_CARRERA><AÑO_ACTUAL>-<CONSECUTIVO 5 dígitos>
-    Ej: LEN2026-00001, LEN2026-00002, ...
-    El consecutivo se calcula buscando la última matrícula ya usada
-    con ese mismo prefijo (carrera + año), NO el total de alumnos,
-    para que nunca se reutilice un número aunque se den de baja alumnos.
-
-    NOTA sobre concurrencia: with_for_update() bloquea la fila leída para
-    que otra transacción no pueda leer el mismo "último folio" hasta que
-    esta termine — esto reduce la condición de carrera en PostgreSQL
-    (producción). En SQLite (desarrollo) no hay bloqueo por fila, así que
-    la cláusula se ignora silenciosamente sin causar error; por eso la
-    protección real y definitiva contra colisiones es la función
-    crear_alumno_generando_matricula() de abajo, que reintenta si de
-    todos modos ocurre un choque (ej. dos registros "primeros" del mismo
-    prefijo, exactamente al mismo tiempo, donde no hay fila que bloquear).
-    """
-    anio_actual = ahora_utc().year
-    prefijo = f"{plan.clave_carrera}{anio_actual}-"
-
-    consulta = (
-        Alumno.query
-        .filter(Alumno.matricula_id.like(f"{prefijo}%"))
-        .order_by(Alumno.matricula_id.desc())
-    )
-
-    # with_for_update() (bloqueo de fila) solo tiene efecto real en motores
-    # que lo soportan, como PostgreSQL (producción). SQLite (desarrollo)
-    # no tiene bloqueo por fila — en vez de asumir que SQLAlchemy lo ignora
-    # solo, lo excluimos explícitamente aquí para no depender de un
-    # comportamiento de dialecto sin poder verificarlo en este entorno.
-    if db.engine.dialect.name != 'sqlite':
-        consulta = consulta.with_for_update()
-
-    ultimo = consulta.first()
-
-    if ultimo:
-        ultimo_num = int(ultimo.matricula_id.split('-')[-1])
-        siguiente = ultimo_num + 1
-    else:
-        siguiente = 1
-
-    return f"{prefijo}{siguiente:05d}"
-
-
-def crear_alumno_generando_matricula(plan: 'PlanEstudio', intentos_maximos: int = 3, **datos_alumno):
-    """
-    Crea y guarda un Alumno generándole matrícula automáticamente, con
-    reintentos ante una colisión de matrícula por condición de carrera
-    (dos registros al mismo tiempo). Hace su PROPIO commit (por diseño:
-    así, si se usa dentro de un bucle de carga masiva, una fila que falla
-    nunca arrastra consigo a las filas anteriores que ya se guardaron bien
-    — cada una queda comprometida en la base de datos de forma individual).
-
-    Devuelve (alumno, None) si tuvo éxito, o (None, mensaje_error) si
-    fallaron todos los intentos. NO valida CURP duplicada ni nada del
-    resto de las reglas de negocio — eso debe hacerse ANTES de llamar
-    aquí; esta función solo protege la generación de matrícula.
-    """
-    for _intento in range(intentos_maximos):
-        matricula = generar_matricula(plan)
-        nuevo_alumno = Alumno(matricula_id=matricula, id_plan_fk=plan.id, **datos_alumno)
-
-        try:
-            db.session.add(nuevo_alumno)
-            db.session.commit()
-            return nuevo_alumno, None
-        except IntegrityError:
-            db.session.rollback()
-            continue  # Probable colisión de matrícula: se reintenta con el siguiente consecutivo
-
-    return None, 'no se pudo generar una matrícula única tras varios intentos; intenta de nuevo'
-
 
 @app.route('/registro', methods=['GET', 'POST'])
 @limiter.limit('20 per hour;5 per minute', methods=['POST'])
@@ -1715,225 +1592,6 @@ def desactivar_beca(beca_id):
     return redirect(url_for('becas_alumno', matricula=beca.matricula_fk))
 
 
-def _cargo_duplicado(matricula, concepto_cobro_id, periodo_escolar):
-    """
-    Busca un cargo NO cancelado ya existente para el mismo alumno, mismo
-    concepto del catálogo y mismo periodo escolar. Se usa tanto al crear
-    un cargo individual como al generar mensualidades en lote, para no
-    cobrarle dos veces el mismo concepto a la misma persona por error.
-    """
-    return Cargo.query.filter(
-        Cargo.matricula_fk == matricula,
-        Cargo.concepto_cobro_fk == concepto_cobro_id,
-        Cargo.periodo_escolar == periodo_escolar,
-        Cargo.estatus != EstatusCargo.CANCELADO,
-    ).first()
-
-
-def _meses_del_cuatrimestre_actual():
-    """[(año, mes), ...] de los 4 meses del cuatrimestre EN CURSO (A=Ene-Abr, B=May-Ago, C=Sep-Dic)."""
-    hoy = hoy_local()
-    if hoy.month <= 4:
-        meses = [1, 2, 3, 4]
-    elif hoy.month <= 8:
-        meses = [5, 6, 7, 8]
-    else:
-        meses = [9, 10, 11, 12]
-    return [(hoy.year, m) for m in meses]
-
-
-def _monto_mensualidad_con_beca(alumno, periodo_cargo):
-    """
-    Monto de mensualidad a cobrar para un cargo de un periodo específico
-    (ej. "2026-B-May"), aplicando cualquier beca ACTIVA cuyo periodo de
-    vigencia sea un prefijo de ese periodo (una beca con
-    periodo_escolar="2026-B" aplica a todos los cargos mensuales de ese
-    cuatrimestre: "2026-B-May", "2026-B-Jun", etc.). Si el alumno tiene
-    más de una beca vigente al mismo tiempo, se usa la de MAYOR
-    descuento (nunca se suman varias becas entre sí).
-    """
-    monto_base = alumno.plan.monto_mensualidad
-    # `is None` a propósito, NO `not monto_base`: una mensualidad de $0.00
-    # es un precio CONFIGURADO (la institución decidió que esa carrera es
-    # gratuita), mientras que NULL significa "todavía no se captura". Ver
-    # _generar_cargos_de_periodo().
-    if monto_base is None:
-        return None
-
-    becas_vigentes = [b for b in alumno.becas if b.activa and periodo_cargo.startswith(b.periodo_escolar)]
-    if not becas_vigentes:
-        return monto_base
-
-    mejor_beca = max(becas_vigentes, key=lambda b: b.calcular_descuento(monto_base))
-    monto_final = monto_base - mejor_beca.calcular_descuento(monto_base)
-    return max(monto_final, Decimal('0.00'))
-
-
-def _generar_cargos_de_periodo(alumno, nombre_concepto_unico):
-    """
-    Genera: 1 cargo del concepto indicado ("Inscripción" al activarse por
-    primera vez, o "Reinscripción" al avanzar de cuatrimestre) + un cargo
-    de mensualidad por cada mes del cuatrimestre EN CURSO únicamente (no
-    de toda la carrera): los cuatrimestres futuros se generan uno a la
-    vez, cuando toque avanzarlos -- así, si el precio de la mensualidad
-    cambia, no queda arrastrado un cargo viejo con el precio equivocado.
-    El resto de conceptos (Uniformes, Servicio Social, etc.) se siguen
-    agregando a mano. Nunca duplica: reutiliza _cargo_duplicado() antes
-    de crear cada cargo.
-
-    LOS PRECIOS SON CONFIGURACIÓN DE LA INSTITUCIÓN, y esta función NUNCA
-    los inventa. `ConceptoCobro.monto_sugerido` y
-    `PlanEstudio.monto_mensualidad` son nullable a propósito: NULL
-    significa "esta institución todavía no capturó ese precio", que NO es
-    lo mismo que $0.00 (eso sería "es gratis", una decisión que solo
-    Dirección puede tomar desde su pantalla de configuración). Si falta el
-    precio no se genera el cargo: se devuelve el aviso para que la persona
-    sepa exactamente qué configuración falta y dónde capturarla.
-
-    Devuelve (cargos_generados, avisos_de_configuracion).
-    """
-    periodo_actual = periodo_escolar_actual()
-    vencimiento_default = datetime.strptime(_vencimiento_dia_10_sugerido(), '%Y-%m-%d').date()
-    cargos_generados = []
-    avisos_de_configuracion = []
-
-    concepto_unico = ConceptoCobro.query.filter_by(nombre=nombre_concepto_unico, activo=True).first()
-    if concepto_unico and not _cargo_duplicado(alumno.matricula_id, concepto_unico.id, periodo_actual):
-        if concepto_unico.monto_sugerido is None:
-            avisos_de_configuracion.append(
-                f'No se generó el cargo de "{concepto_unico.nombre}": ese concepto todavía '
-                'no tiene precio configurado en el catálogo de la institución. Captúralo en '
-                'Conceptos de Cobro y genera el cargo desde la pantalla de Cobros.'
-            )
-        else:
-            cargo = Cargo(
-                matricula_fk=alumno.matricula_id,
-                concepto_cobro_fk=concepto_unico.id,
-                concepto=concepto_unico.nombre,
-                monto=concepto_unico.monto_sugerido,
-                periodo_escolar=periodo_actual,
-                fecha_vencimiento=vencimiento_default,
-                estatus=EstatusCargo.PENDIENTE,
-            )
-            db.session.add(cargo)
-            cargos_generados.append(cargo)
-
-    concepto_mensualidad = ConceptoCobro.query.filter_by(es_mensualidad=True, activo=True).first()
-    if concepto_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
-        avisos_de_configuracion.append(
-            f'No se generaron los cargos de mensualidad: la carrera '
-            f'"{alumno.plan.nombre if alumno.plan else "(sin plan)"}" todavía no tiene '
-            'mensualidad configurada. Captúrala en Mensualidades por Carrera.'
-        )
-    elif concepto_mensualidad:
-        for anio, mes in _meses_del_cuatrimestre_actual():
-            etiqueta_mes = f'{periodo_actual}-{MESES_ES[mes]}'  # Ej. "2026-B-May" -- único por mes, cabe en 20 caracteres
-            if _cargo_duplicado(alumno.matricula_id, concepto_mensualidad.id, etiqueta_mes):
-                continue
-            cargo = Cargo(
-                matricula_fk=alumno.matricula_id,
-                concepto_cobro_fk=concepto_mensualidad.id,
-                concepto=concepto_mensualidad.nombre,
-                monto=_monto_mensualidad_con_beca(alumno, etiqueta_mes),
-                periodo_escolar=etiqueta_mes,
-                fecha_vencimiento=date(anio, mes, 10),
-                estatus=EstatusCargo.PENDIENTE,
-            )
-            db.session.add(cargo)
-            cargos_generados.append(cargo)
-
-    return cargos_generados, avisos_de_configuracion
-
-
-def _generar_cargos_de_inscripcion(alumno):
-    """
-    Al activar a un alumno por PRIMERA vez: cargo de Inscripción +
-    mensualidades del cuatrimestre en curso. Devuelve
-    (cargos_generados, avisos_de_configuracion).
-    """
-    return _generar_cargos_de_periodo(alumno, 'Inscripción')
-
-
-def _generar_cargos_de_reinscripcion(alumno):
-    """
-    Al avanzarlo de cuatrimestre: cargo de Reinscripción + mensualidades
-    del nuevo cuatrimestre en curso. Devuelve
-    (cargos_generados, avisos_de_configuracion).
-    """
-    return _generar_cargos_de_periodo(alumno, 'Reinscripción')
-
-
-def _generar_carga_academica(alumno):
-    """
-    Registra la "carga académica" del alumno: una fila por cada materia
-    de SU plan y SU cuatrimestre actual (Escudo del Plan de Estudios
-    aplicado también aquí -- nunca se inscribe una materia de otra
-    carrera). Se corre junto con _generar_cargos_de_inscripcion() al
-    activarlo por primera vez.
-    """
-    periodo_actual = periodo_escolar_actual()
-    materias_del_cuatrimestre = (
-        Materia.query
-        .filter_by(id_plan_fk=alumno.id_plan_fk, cuatrimestre=alumno.cuatrimestre_actual)
-        .order_by(Materia.nombre.asc())
-        .all()
-    )
-
-    inscripciones_generadas = []
-    for materia in materias_del_cuatrimestre:
-        ya_existe = InscripcionMateria.query.filter_by(
-            matricula_fk=alumno.matricula_id,
-            id_materia_fk=materia.id,
-            periodo_escolar=periodo_actual,
-        ).first()
-        if ya_existe:
-            continue
-        inscripcion = InscripcionMateria(
-            matricula_fk=alumno.matricula_id,
-            id_materia_fk=materia.id,
-            periodo_escolar=periodo_actual,
-        )
-        db.session.add(inscripcion)
-        inscripciones_generadas.append(inscripcion)
-
-    return inscripciones_generadas
-
-
-def _avanzar_cuatrimestre(alumno):
-    """
-    Avanza al alumno al SIGUIENTE cuatrimestre: incrementa
-    cuatrimestre_actual, genera su cargo de Reinscripción + las
-    mensualidades del nuevo cuatrimestre (mismo criterio que al activarlo
-    por primera vez), y su nueva carga académica -- reutilizando los
-    mismos helpers, así que nunca duplica nada.
-
-    Devuelve (ok, mensaje, cargos_generados, materias_generadas,
-    avisos_de_configuracion) -- lo último es lo que haga falta capturar en
-    la configuración de precios de la institución (ver
-    _generar_cargos_de_periodo()).
-    No avanza (ok=False) si el alumno no está Activo, o si ya está en el
-    último cuatrimestre configurado.
-    """
-    max_cuatri = _max_periodos()
-
-    if alumno.estatus != EstatusAlumno.ACTIVO:
-        return False, f'{alumno.nombre_completo} no está Activo (está en "{alumno.estatus.value}"), no se puede avanzar.', [], [], []
-
-    if alumno.cuatrimestre_actual >= max_cuatri:
-        return False, f'{alumno.nombre_completo} ya está en el último cuatrimestre configurado ({max_cuatri}°).', [], [], []
-
-    alumno.cuatrimestre_actual += 1
-
-    cargos_generados, avisos_de_configuracion = _generar_cargos_de_reinscripcion(alumno)
-
-    # _generar_carga_academica() lee alumno.cuatrimestre_actual, que ya
-    # quedó incrementado arriba -- por eso genera la del cuatrimestre NUEVO.
-    materias_generadas = _generar_carga_academica(alumno)
-
-    mensaje = f'{alumno.nombre_completo} avanzó al {alumno.cuatrimestre_actual}° cuatrimestre.'
-    return True, mensaje, cargos_generados, materias_generadas, avisos_de_configuracion
-
-
 @app.route('/alumno/<matricula>/cobros/nuevo', methods=['POST'])
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def nuevo_cargo(matricula):
@@ -2019,91 +1677,6 @@ def nuevo_cargo(matricula):
 
     flash(f'Cargo "{concepto_cobro.nombre}" agregado correctamente.', 'success')
     return redirect(url_for('cobros', matricula=matricula))
-
-
-# SECURITY-NOTE: lo que se le dice al personal cuando falla un envío.
-# Antes se devolvía str(error), y ese texto se mostraba tal cual en el
-# flash del cobro y en la lista de recordatorios fallidos. Una excepción
-# de smtplib puede traer el host del servidor de correo, la cuenta usada
-# y códigos internos: información de infraestructura que no le sirve a
-# quien está cobrando en ventanilla y que no debe quedar en pantalla.
-# El detalle completo NO se pierde -- va al log del servidor con
-# app.logger.warning(..., exc_info=True), que es donde lo necesita quien
-# administra el VPS (logs/sge.log, ver create_app).
-MOTIVO_GENERICO_FALLO_CORREO = (
-    'No se pudo conectar con el servidor de correo. Revisa la conexión a internet '
-    'o la configuración de correo del sistema; el detalle técnico quedó en el log '
-    'del servidor.'
-)
-
-
-def enviar_comprobante_pago(alumno, cargo, pago):
-    """
-    Envía el comprobante de pago al correo del alumno. Si el alumno no
-    tiene correo registrado, o si falla el envío (sin internet, SMTP
-    caído, etc.), NO debe romper el registro del pago -- el pago ya
-    quedó guardado en la BD; solo se avisa al usuario que el correo no
-    se pudo mandar.
-    """
-    if not alumno.correo:
-        return False, 'El alumno no tiene correo registrado.'
-
-    try:
-        mensaje = Message(
-            subject=f'Comprobante de Pago - Folio {pago.folio or ("#" + str(pago.id))}',
-            recipients=[alumno.correo],
-            body=(
-                f'Hola {alumno.nombre_completo},\n\n'
-                f'Se registró tu pago con los siguientes datos:\n\n'
-                f'Concepto: {cargo.concepto}\n'
-                f'Monto pagado: ${pago.monto_pagado}\n'
-                f'Fecha: {pago.fecha_pago.strftime("%d/%m/%Y %H:%M")}\n'
-                f'Folio: {pago.folio or ("#" + str(pago.id))}\n'
-                f'Saldo pendiente del cargo: ${cargo.saldo_pendiente()}\n\n'
-                f'Este es un correo automático del Sistema de Gestión Escolar.'
-            ),
-        )
-        mail.send(mensaje)
-        return True, None
-    except Exception:
-        app.logger.warning(
-            'Falló el envío del comprobante del pago %s (cargo %s, alumno %s).',
-            pago.id, cargo.id, alumno.matricula_id, exc_info=True
-        )
-        return False, MOTIVO_GENERICO_FALLO_CORREO
-
-
-DIAS_AVISO_VENCIMIENTO = 3  # Manda el recordatorio cuando falten esta cantidad de días (o menos) para vencer
-
-
-def enviar_recordatorio_vencimiento(alumno, cargo):
-    """Igual que enviar_comprobante_pago: nunca truena, solo reporta si pudo o no."""
-    if not alumno.correo:
-        return False, 'El alumno no tiene correo registrado.'
-
-    try:
-        mensaje = Message(
-            subject=f'Recordatorio: {cargo.concepto} próximo a vencer',
-            recipients=[alumno.correo],
-            body=(
-                f'Hola {alumno.nombre_completo},\n\n'
-                f'Te recordamos que tienes un pago próximo a vencer:\n\n'
-                f'Concepto: {cargo.concepto}\n'
-                f'Periodo: {cargo.periodo_escolar or "N/A"}\n'
-                f'Saldo pendiente: ${cargo.saldo_pendiente()}\n'
-                f'Fecha límite: {cargo.fecha_vencimiento.strftime("%d/%m/%Y")}\n\n'
-                f'Después de esta fecha se aplica un recargo por atraso.\n\n'
-                f'Este es un correo automático del Sistema de Gestión Escolar.'
-            ),
-        )
-        mail.send(mensaje)
-        return True, None
-    except Exception:
-        app.logger.warning(
-            'Falló el envío del recordatorio de vencimiento del cargo %s (alumno %s).',
-            cargo.id, alumno.matricula_id, exc_info=True
-        )
-        return False, MOTIVO_GENERICO_FALLO_CORREO
 
 
 @app.route('/cobro/<int:cargo_id>/pagar', methods=['POST'])
@@ -2335,43 +1908,6 @@ def estado_cuenta(matricula):
     )
 
 
-def _calcular_reporte_cobros_del_dia(fecha_reporte):
-    """
-    Extraída de reporte_cobros_del_dia() para que la vista en pantalla y
-    la exportación a Excel usen SIEMPRE el mismo cálculo -- nunca se
-    desincronizan entre sí.
-
-    fecha_reporte es un día CALENDARIO LOCAL (el que vivió la caja); como
-    Pago.fecha_pago se guarda en UTC, el rango de búsqueda tiene que
-    convertirse a UTC con rango_utc_del_dia() -- comparar contra
-    medianoche-a-medianoche naive (como si fecha_reporte ya fuera UTC)
-    hacía que un pago cobrado por la noche apareciera en el corte del
-    día siguiente.
-    """
-    inicio_dia, fin_dia = rango_utc_del_dia(fecha_reporte)
-
-    pagos_del_dia = (
-        Pago.query
-        .filter(Pago.fecha_pago >= inicio_dia, Pago.fecha_pago <= fin_dia)
-        .order_by(Pago.fecha_pago.asc())
-        .all()
-    )
-
-    # Los pagos anulados SÍ se muestran en la lista (transparencia total del
-    # día), pero NO cuentan en los totales -- ese dinero no se quedó cobrado.
-    pagos_vigentes = [p for p in pagos_del_dia if not p.anulado]
-    total_del_dia = sum((p.monto_pagado for p in pagos_vigentes), Decimal('0.00'))
-
-    totales_por_concepto = {}
-    totales_por_metodo = {}
-    for pago in pagos_vigentes:
-        concepto = pago.cargo.concepto if pago.cargo else 'Sin concepto'
-        totales_por_concepto[concepto] = totales_por_concepto.get(concepto, Decimal('0.00')) + pago.monto_pagado
-        totales_por_metodo[pago.metodo_pago.value] = totales_por_metodo.get(pago.metodo_pago.value, Decimal('0.00')) + pago.monto_pagado
-
-    return pagos_del_dia, total_del_dia, totales_por_concepto, totales_por_metodo
-
-
 @app.route('/reportes/cobros-del-dia')
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def reporte_cobros_del_dia():
@@ -2476,73 +2012,6 @@ def exportar_reporte_cobros_del_dia():
     )
 
 
-def _calcular_cartera_vencida():
-    """
-    Extraída de cartera_vencida() para reutilizar en la exportación a Excel.
-
-    PERFORMANCE-NOTE: la versión anterior hacía Cargo.query...all() y luego,
-    por cada cargo candidato, llamaba esta_vencido() / actualizar_recargo_si_vencido()
-    / saldo_pendiente() -- cada una de esas dispara cargo.pagos (lazy='select'
-    en la relación Cargo.pagos, ver clase Pago), y actualizar_recargo_si_vencido()
-    además llamaba ConfiguracionCobros.obtener() en CADA iteración, repitiendo
-    la misma consulta de una tabla de una sola fila. Con miles de cargos
-    vencidos (justo el escenario de este reporte: "cartera vencida" tiende a
-    crecer con el tiempo), esto son miles de consultas extra en una sola
-    carga de página.
-
-    Esta versión:
-      1. Trae la config UNA sola vez, antes del loop.
-      2. Calcula el total pagado de todos los cargos candidatos con UNA
-         agregación SQL (mismo patrón que _matriculas_con_adeudo), en vez
-         de que cada cargo dispare su propia consulta a Pago.
-    """
-    hoy = hoy_local()
-    config = ConfiguracionCobros.obtener()  # una sola vez, no una vez por cargo
-
-    candidatos = (
-        Cargo.query
-        .filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL]))
-        .filter(Cargo.fecha_vencimiento.isnot(None))
-        .filter(Cargo.fecha_vencimiento < hoy)  # ya filtra "vencido" en SQL, no solo en Python
-        .all()
-    )
-
-    if not candidatos:
-        return [], Decimal('0.00')
-
-    cargo_ids = [c.id for c in candidatos]
-    pagos_por_cargo = dict(
-        db.session.query(
-            Pago.cargo_fk,
-            func.coalesce(func.sum(Pago.monto_pagado), 0)
-        )
-        .filter(Pago.cargo_fk.in_(cargo_ids))
-        .filter(Pago.anulado.is_(False))
-        .group_by(Pago.cargo_fk)
-        .all()
-    )
-
-    filas = []
-    for cargo in candidatos:
-        # esta_vencido() ya no hace falta re-evaluarlo: el filtro SQL de
-        # arriba (fecha_vencimiento < hoy) más el filtro de estatus ya
-        # garantizan que todo lo que llega aquí está vencido.
-        cargo.actualizar_recargo_si_vencido(config=config)
-        total_pagado = pagos_por_cargo.get(cargo.id, Decimal('0.00'))
-        saldo = (cargo.monto + cargo.recargo_aplicado) - total_pagado
-        filas.append({
-            'cargo': cargo,
-            'dias_atraso': (hoy - cargo.fecha_vencimiento).days,
-            'saldo': saldo,
-        })
-    db.session.commit()  # persiste cualquier recargo que se haya actualizado arriba
-
-    filas.sort(key=lambda f: f['saldo'], reverse=True)
-    total_vencido = sum((f['saldo'] for f in filas), Decimal('0.00'))
-
-    return filas, total_vencido
-
-
 @app.route('/reportes/cartera-vencida')
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def cartera_vencida():
@@ -2621,111 +2090,6 @@ def exportar_cartera_vencida():
     )
 
 
-MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-
-
-def _rango_ultimos_n_meses(n=6):
-    """Lista de diccionarios describiendo cada uno de los últimos n meses (incluye el actual)."""
-    hoy = hoy_local()
-    rangos = []
-    for i in range(n - 1, -1, -1):
-        mes_ref = hoy.month - i
-        anio_ref = hoy.year
-        while mes_ref <= 0:
-            mes_ref += 12
-            anio_ref -= 1
-        inicio = date(anio_ref, mes_ref, 1)
-        fin = (date(anio_ref + 1, 1, 1) if mes_ref == 12 else date(anio_ref, mes_ref + 1, 1)) - timedelta(days=1)
-        rangos.append({
-            'anio': anio_ref,
-            'mes': mes_ref,
-            'inicio': datetime.combine(inicio, datetime.min.time()),
-            'fin': datetime.combine(fin, datetime.max.time()),
-            'etiqueta': f'{MESES_ES[mes_ref]} {anio_ref}',
-        })
-    return rangos
-
-
-def _calcular_dashboard_cobros():
-    """Extraída para reutilizar entre la vista del dashboard y su exportación a Excel."""
-    rangos = _rango_ultimos_n_meses(6)
-
-    ingresos_mensuales = []
-    for r in rangos:
-        total = db.session.query(func.sum(Pago.monto_pagado)).filter(
-            Pago.fecha_pago >= r['inicio'], Pago.fecha_pago <= r['fin'], Pago.anulado.is_(False)
-        ).scalar() or Decimal('0.00')
-        ingresos_mensuales.append({'etiqueta': r['etiqueta'], 'total': total})
-
-    inicio_periodo = rangos[0]['inicio']
-    fin_periodo = rangos[-1]['fin']
-
-    ingresos_por_concepto_raw = (
-        db.session.query(Cargo.concepto, func.sum(Pago.monto_pagado))
-        .join(Pago, Pago.cargo_fk == Cargo.id)
-        .filter(Pago.fecha_pago >= inicio_periodo, Pago.fecha_pago <= fin_periodo, Pago.anulado.is_(False))
-        .group_by(Cargo.concepto)
-        .order_by(func.sum(Pago.monto_pagado).desc())
-        .all()
-    )
-    ingresos_por_concepto = [{'concepto': c, 'total': t} for c, t in ingresos_por_concepto_raw]
-
-    total_cobrado_6_meses = sum((item['total'] for item in ingresos_mensuales), Decimal('0.00'))
-    total_cobrado_mes_actual = ingresos_mensuales[-1]['total'] if ingresos_mensuales else Decimal('0.00')
-
-    # Reutiliza el mismo recálculo que Cobros y Cartera Vencida -- nunca
-    # se confía en un recargo_aplicado guardado sin refrescar primero.
-    #
-    # PERFORMANCE-NOTE: mismo patrón N+1 que tenía _calcular_cartera_vencida
-    # (ver esa función) -- este dashboard es la pantalla que más seguido se
-    # va a abrir, así que se arregla igual: config cargada una sola vez, y
-    # el saldo de todos los cargos abiertos calculado con UNA agregación
-    # SQL en vez de que cada cargo dispare su propia consulta a Pago.
-    hoy = hoy_local()
-    config = ConfiguracionCobros.obtener()
-    cargos_abiertos = Cargo.query.filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL])).all()
-    hubo_cambios = False
-    for cargo in cargos_abiertos:
-        antes = cargo.recargo_aplicado
-        cargo.actualizar_recargo_si_vencido(config=config)
-        if cargo.recargo_aplicado != antes:
-            hubo_cambios = True
-    if hubo_cambios:
-        db.session.commit()
-
-    if cargos_abiertos:
-        cargo_ids = [c.id for c in cargos_abiertos]
-        pagos_por_cargo = dict(
-            db.session.query(
-                Pago.cargo_fk,
-                func.coalesce(func.sum(Pago.monto_pagado), 0)
-            )
-            .filter(Pago.cargo_fk.in_(cargo_ids))
-            .filter(Pago.anulado.is_(False))
-            .group_by(Pago.cargo_fk)
-            .all()
-        )
-    else:
-        pagos_por_cargo = {}
-
-    total_por_cobrar = Decimal('0.00')
-    total_vencido = Decimal('0.00')
-    for cargo in cargos_abiertos:
-        saldo = (cargo.monto + cargo.recargo_aplicado) - pagos_por_cargo.get(cargo.id, Decimal('0.00'))
-        total_por_cobrar += saldo
-        if cargo.fecha_vencimiento is not None and cargo.fecha_vencimiento < hoy:
-            total_vencido += saldo
-
-    return {
-        'ingresos_mensuales': ingresos_mensuales,
-        'ingresos_por_concepto': ingresos_por_concepto,
-        'total_cobrado_6_meses': total_cobrado_6_meses,
-        'total_cobrado_mes_actual': total_cobrado_mes_actual,
-        'total_por_cobrar': total_por_cobrar,
-        'total_vencido': total_vencido,
-    }
-
-
 @app.route('/cobros/dashboard')
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')
 def dashboard_cobros():
@@ -2785,22 +2149,6 @@ def exportar_dashboard_cobros():
         download_name=f'dashboard_cobros_{ahora_utc().date().isoformat()}.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-
-
-def _vencimiento_dia_10_sugerido() -> str:
-    """
-    Fecha sugerida para el vencimiento de mensualidad/reinscripción: el
-    alumno tiene del 1 al 10 del mes para pagar. Si ya pasó el día 10 de
-    este mes, se sugiere el día 10 del mes siguiente.
-    """
-    hoy = hoy_local()
-    anio, mes = hoy.year, hoy.month
-    if hoy.day > 10:
-        mes += 1
-        if mes > 12:
-            mes = 1
-            anio += 1
-    return date(anio, mes, 10).isoformat()
 
 
 @app.route('/cobros/generar-mensualidades', methods=['GET', 'POST'])
@@ -3353,35 +2701,6 @@ def configuracion_cobros():
 # Solo Control Escolar captura, con base en actas físicas firmadas.
 # El "Escudo" se aplica filtrando SIEMPRE por id_plan_fk del alumno.
 # ---------------------------------------------------------------------------
-
-def _registrar_historial_calificacion(alumno, materia, periodo_escolar, calificacion_anterior, calificacion_nueva):
-    """Deja rastro de CADA captura o corrección de calificación -- nunca se sobreescribe ni se borra."""
-    db.session.add(HistorialCalificacion(
-        matricula_fk=alumno.matricula_id,
-        id_materia_fk=materia.id,
-        periodo_escolar=periodo_escolar,
-        usuario_fk=current_user.id,
-        calificacion_anterior=calificacion_anterior,
-        calificacion_nueva=calificacion_nueva,
-    ))
-
-
-def _siguiente_numero_acta() -> str:
-    """
-    Genera un folio nuevo de acta, estilo "ACTA-2026-000042" (mismo patrón
-    que Pago.folio). Ya NO es un campo que capture el usuario -- se genera
-    uno por cada envío del formulario de boleta o de carga masiva, y se
-    comparte entre todas las materias guardadas en ese mismo envío.
-
-    ACTUALIZACIÓN: antes esto buscaba el máximo numero_acta existente y le
-    sumaba 1 -- funcionaba mientras solo una persona capturara boletas a
-    la vez, pero tenía una condición de carrera real (dos personas
-    guardando boletas en el mismo instante podían recibir el mismo
-    folio). Ahora usa siguiente_folio(), que sí protege contra eso -- ver
-    ContadorFolio y siguiente_folio() para el detalle de la protección.
-    """
-    return siguiente_folio(tipo='ACTA', prefijo='ACTA', digitos=6)
-
 
 @app.route('/alumno/<matricula>/boleta', methods=['GET', 'POST'])
 @rol_requerido('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')
