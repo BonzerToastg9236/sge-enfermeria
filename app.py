@@ -27,7 +27,6 @@ from zoneinfo import ZoneInfo
 
 
 from decimal import Decimal, InvalidOperation
-from functools import wraps
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -56,7 +55,14 @@ from extensiones import db, migrate, login_manager, csrf, limiter, mail
 from utilidades.fechas import (
     ZONA_HORARIA_DEFAULT, ahora_utc, hoy_local, a_local,
     rango_utc_del_dia, periodo_escolar_actual,
+    _filtro_fechahora, _filtro_fecha, _filtro_hora, _filtro_fecha_larga,
 )
+from utilidades.seguridad import load_user, es_url_segura, rol_requerido
+from utilidades.archivos import (
+    extension_permitida, contenido_coincide_con_extension, FIRMAS_POR_EXTENSION,
+)
+from utilidades.folios import siguiente_folio
+from utilidades.paginacion import _paginar_lista, ALUMNOS_POR_PAGINA, CARGOS_POR_PAGINA
 from modelos import (
     RolUsuario, Usuario,
     EstatusAlumno, TurnoAlumno, ModalidadEstudio,
@@ -126,47 +132,6 @@ def siguiente_folio(tipo: str, prefijo: str, digitos: int = 6, intentos_maximos:
 # .strftime() directamente sobre un DateTime. Las columnas Date puras
 # (fecha_nacimiento, fecha_vencimiento, etc.) siguen mostrándose igual:
 # ya son locales por diseño y no tienen nada que convertir.
-
-MESES_LARGOS_ES = [
-    '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-]
-
-
-def _filtro_fechahora(valor, formato='%d/%m/%Y %H:%M'):
-    """|fechahora -- DateTime guardado en UTC, mostrado en hora local."""
-    local = a_local(valor)
-    return local.strftime(formato) if local else '—'
-
-
-def _filtro_fecha(valor, formato='%d/%m/%Y'):
-    """
-    |fecha -- sirve tanto para DateTime (se convierte a local primero)
-    como para Date puro (NO se convierte: ya es local por diseño).
-    """
-    if valor is None:
-        return '—'
-    if isinstance(valor, datetime):
-        return a_local(valor).strftime(formato)
-    return valor.strftime(formato)
-
-
-def _filtro_hora(valor, formato='%H:%M'):
-    """|hora -- solo la hora local de un DateTime."""
-    local = a_local(valor)
-    return local.strftime(formato) if local else '—'
-
-
-def _filtro_fecha_larga(valor):
-    """
-    |fecha_larga -- "17 de agosto de 2026", con meses en español.
-    strftime('%B') depende del locale del sistema operativo, y el VPS de
-    producción (Ubuntu sin locale es_MX instalado) lo devuelve en inglés.
-    """
-    if valor is None:
-        return '—'
-    d = a_local(valor).date() if isinstance(valor, datetime) else valor
-    return f'{d.day} de {MESES_LARGOS_ES[d.month]} de {d.year}'
 
 
 # ---------------------------------------------------------------------------
@@ -355,47 +320,6 @@ def error_interno(error):
     db.session.rollback()  # por si el error dejó la sesión de SQLAlchemy en un estado inconsistente
     return render_template('errores/500.html'), 500
 
-
-@login_manager.user_loader
-def load_user(user_id):
-    return db.session.get(Usuario, int(user_id))
-
-
-def es_url_segura(destino: str) -> bool:
-    """
-    Evita un 'Open Redirect': sin esta validación, alguien podría mandar un
-    link tipo /login?next=https://sitio-falso.com y, tras iniciar sesión
-    correctamente en el sitio REAL, el usuario terminaría redirigido a un
-    sitio externo (útil para phishing dirigido al personal). Solo se
-    permite continuar si 'next' es una ruta relativa de este mismo sitio
-    (sin esquema http/https ni host propios).
-    """
-    if not destino:
-        return False
-    partes = urlparse(destino)
-    return not partes.scheme and not partes.netloc
-
-
-def rol_requerido(*roles_permitidos):
-    """
-    Decorador para restringir una ruta a ciertos roles (ej. solo DIRECTIVO).
-    Siempre exige login primero (@login_required incluido). Uso:
-
-        @app.route('/algo-solo-de-dirección')
-        @rol_requerido('DIRECTIVO')
-        def algo():
-            ...
-    """
-    def decorador(func):
-        @wraps(func)
-        @login_required
-        def envoltura(*args, **kwargs):
-            if current_user.rol.name not in roles_permitidos:
-                flash('No tienes permisos para realizar esta acción.', 'danger')
-                return redirect(url_for('index'))
-            return func(*args, **kwargs)
-        return envoltura
-    return decorador
 
 
 # ---------------------------------------------------------------------------
@@ -644,40 +568,6 @@ def _max_periodos() -> int:
 # de H4), pero el navegador tiene que descargar y pintar ese megabyte:
 # en una laptop modesta o por WiFi de la escuela, eso sí se siente.
 # El cuello de botella no era SQL, era el tamaño de la respuesta.
-ALUMNOS_POR_PAGINA = 24   # 24 = 8 filas de 3 tarjetas en pantalla grande
-CARGOS_POR_PAGINA = 50
-
-
-def _paginar_lista(items, page, per_page):
-    """
-    Pagina una lista que YA está en memoria.
-
-    Se usa donde el orden final no se puede resolver en SQL. Caso concreto:
-    la cartera vencida se ordena por saldo pendiente, que es un valor
-    calculado (monto + recargo - pagos), no una columna de la tabla.
-
-    Devuelve (items_de_esta_pagina, info_paginacion). El diccionario de
-    info expone las mismas llaves que el objeto Pagination de
-    Flask-SQLAlchemy (page, pages, total, has_prev, has_next, prev_num,
-    next_num), para que las plantillas usen SIEMPRE la misma sintaxis sin
-    importar de cuál de los dos venga.
-    """
-    total = len(items)
-    total_paginas = max(1, (total + per_page - 1) // per_page)
-    page = min(max(page, 1), total_paginas)  # una página fuera de rango no truena
-    inicio = (page - 1) * per_page
-
-    return items[inicio:inicio + per_page], {
-        'page': page,
-        'per_page': per_page,
-        'total': total,
-        'pages': total_paginas,
-        'has_prev': page > 1,
-        'has_next': page < total_paginas,
-        'prev_num': page - 1,
-        'next_num': page + 1,
-    }
-
 
 @app.route('/')
 @login_required
@@ -1296,60 +1186,6 @@ def importar_alumnos():
 # (escuela de prepa, alergias, teléfono del tutor) y subir los archivos
 # digitalizados: comprobante de domicilio, INE y CURP.
 # ---------------------------------------------------------------------------
-
-def extension_permitida(nombre_archivo: str) -> bool:
-    return (
-        '.' in nombre_archivo
-        and nombre_archivo.rsplit('.', 1)[1].lower() in app.config['EXTENSIONES_PERMITIDAS']
-    )
-
-
-# Firma real (magic bytes) de cada formato aceptado en el expediente.
-#
-# SECURITY-NOTE (hallazgo #7): la extensión del nombre la elige quien sube
-# el archivo, así que por sí sola no prueba nada -- cualquier contenido
-# (un .exe, un HTML con <script>) pasaba con solo llamarlo "documento.pdf".
-# Estos son los primeros bytes que TODO archivo de ese formato lleva por
-# definición del estándar, y no se pueden falsificar sin dejar de ser un
-# archivo válido de ese tipo.
-#
-# Se comprueban a mano en vez de usar python-magic: esa librería necesita
-# libmagic (un paquete del sistema operativo, dependencia nueva en el VPS)
-# y aquí solo hay 3 formatos, todos con firma fija al inicio.
-FIRMAS_POR_EXTENSION = {
-    'pdf': (b'%PDF-',),
-    'png': (b'\x89PNG\r\n\x1a\n',),
-    'jpg': (b'\xff\xd8\xff',),
-    'jpeg': (b'\xff\xd8\xff',),
-}
-
-BYTES_DE_FIRMA = 8  # Suficiente para la firma más larga (PNG)
-
-
-def contenido_coincide_con_extension(archivo) -> bool:
-    """
-    True solo si los primeros bytes del archivo corresponden de verdad al
-    formato que anuncia su extensión.
-
-    Se exige coherencia (no basta con que el contenido sea "alguno de los
-    permitidos"): el archivo se sirve después con el Content-Type derivado
-    de su extensión, y con `X-Content-Type-Options: nosniff` activo en
-    Nginx el navegador NO adivina -- un PNG guardado como .pdf
-    simplemente no se vería. Mejor rechazarlo al subirlo, con un mensaje
-    claro, que descubrirlo el día que alguien necesite el documento.
-
-    Deja el puntero del archivo al inicio: si no se rebobina, el
-    archivo.save() posterior guardaría el contenido truncado.
-    """
-    extension = archivo.filename.rsplit('.', 1)[1].lower() if '.' in archivo.filename else ''
-    firmas = FIRMAS_POR_EXTENSION.get(extension)
-    if not firmas:
-        return False
-
-    inicio = archivo.read(BYTES_DE_FIRMA)
-    archivo.seek(0)
-
-    return any(inicio.startswith(firma) for firma in firmas)
 
 
 # Mapeo de <name> del <input type="file"> -> TipoDocumento correspondiente

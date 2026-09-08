@@ -99,3 +99,45 @@ def periodo_escolar_actual() -> str:
     else:
         letra = 'C'
     return f'{hoy.year}-{letra}'
+
+
+MESES_LARGOS_ES = [
+    '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
+
+def _filtro_fechahora(valor, formato='%d/%m/%Y %H:%M'):
+    """|fechahora -- DateTime guardado en UTC, mostrado en hora local."""
+    local = a_local(valor)
+    return local.strftime(formato) if local else '—'
+
+
+def _filtro_fecha(valor, formato='%d/%m/%Y'):
+    """
+    |fecha -- sirve tanto para DateTime (se convierte a local primero)
+    como para Date puro (NO se convierte: ya es local por diseño).
+    """
+    if valor is None:
+        return '—'
+    if isinstance(valor, datetime):
+        return a_local(valor).strftime(formato)
+    return valor.strftime(formato)
+
+
+def _filtro_hora(valor, formato='%H:%M'):
+    """|hora -- solo la hora local de un DateTime."""
+    local = a_local(valor)
+    return local.strftime(formato) if local else '—'
+
+
+def _filtro_fecha_larga(valor):
+    """
+    |fecha_larga -- "17 de agosto de 2026", con meses en español.
+    strftime('%B') depende del locale del sistema operativo, y el VPS de
+    producción (Ubuntu sin locale es_MX instalado) lo devuelve en inglés.
+    """
+    if valor is None:
+        return '—'
+    d = a_local(valor).date() if isinstance(valor, datetime) else valor
+    return f'{d.day} de {MESES_LARGOS_ES[d.month]} de {d.year}'
