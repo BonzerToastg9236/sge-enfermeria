@@ -1169,13 +1169,21 @@ from modelos import (
     HistorialCalificacion,
 )
 from servicios.cobros import _generar_cargos_de_reinscripcion
+from utilidades.folios import siguiente_folio
 
 # <-- pegar aquí, en el orden de arriba, cada función verbatim -->
 ```
 
-(Verify the exact model/utility imports each function needs by grepping
-its body — e.g. `_siguiente_numero_acta` may use `ahora_utc`/`hoy_local`
-from `utilidades.fechas`, check before finalizing.)
+**Confirmed dependency (verified, not speculative):** `_siguiente_numero_acta`
+(`app.py:4611`) calls `siguiente_folio(tipo='ACTA', prefijo='ACTA',
+digitos=6)` — that's why `utilidades.folios.siguiente_folio` is imported
+above. `utilidades/folios.py` is created earlier in this same task's
+dependency chain (Task 3, Step 4), so it already exists by the time this
+step runs. Also verify with `grep -n "ahora_utc\|hoy_local"` over the
+exact pasted range whether any of the other 4 functions need
+`utilidades.fechas` imports too — none were found in the line ranges
+above during planning, but confirm against the real content before
+finalizing.
 
 - [ ] **Step 5: Create `servicios/reportes.py`**
 
