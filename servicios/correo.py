@@ -13,6 +13,15 @@ from flask_mail import Message
 from extensiones import mail
 
 
+# SECURITY-NOTE: lo que se le dice al personal cuando falla un envío.
+# Antes se devolvía str(error), y ese texto se mostraba tal cual en el
+# flash del cobro y en la lista de recordatorios fallidos. Una excepción
+# de smtplib puede traer el host del servidor de correo, la cuenta usada
+# y códigos internos: información de infraestructura que no le sirve a
+# quien está cobrando en ventanilla y que no debe quedar en pantalla.
+# El detalle completo NO se pierde -- va al log del servidor con
+# app.logger.warning(..., exc_info=True), que es donde lo necesita quien
+# administra el VPS (logs/sge.log, ver create_app).
 MOTIVO_GENERICO_FALLO_CORREO = (
     'No se pudo conectar con el servidor de correo. Revisa la conexión a internet '
     'o la configuración de correo del sistema; el detalle técnico quedó en el log '
