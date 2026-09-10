@@ -36,11 +36,10 @@ from urllib.parse import urlparse
 
 from flask import (
     Flask, render_template, request, flash, redirect, url_for, abort,
-    session, send_file, send_from_directory, current_app
+    send_file, send_from_directory, current_app
 )
 from flask_login import (
-    UserMixin, login_user, logout_user,
-    login_required, current_user
+    UserMixin, login_required, current_user
 )
 from sqlalchemy import UniqueConstraint, CheckConstraint, Index, text, or_
 from sqlalchemy.exc import IntegrityError
@@ -56,7 +55,7 @@ from utilidades.fechas import (
     rango_utc_del_dia, periodo_escolar_actual,
     _filtro_fechahora, _filtro_fecha, _filtro_hora, _filtro_fecha_larga,
 )
-from utilidades.seguridad import load_user, es_url_segura, rol_requerido
+from utilidades.seguridad import load_user, rol_requerido
 from utilidades.archivos import (
     extension_permitida, contenido_coincide_con_extension, FIRMAS_POR_EXTENSION,
 )
@@ -186,7 +185,7 @@ def create_app(config_name='development'):
     migrate.init_app(app, db, render_as_batch=True)
 
     login_manager.init_app(app)
-    login_manager.login_view = 'login'
+    login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Debes iniciar sesión para acceder a esta página.'
     login_manager.login_message_category = 'warning'
 
@@ -247,11 +246,8 @@ def create_app(config_name='development'):
         app.logger.setLevel(logging.INFO if config_name == 'production' else logging.DEBUG)
         app.logger.info('SGE arrancado (config=%s)', config_name)
 
-    # Aquí se registrarán los Blueprints en pasos posteriores:
-    # from routes.registro import registro_bp
-    # from routes.admin import admin_bp
-    # app.register_blueprint(registro_bp)
-    # app.register_blueprint(admin_bp)
+    from rutas.auth import auth_bp
+    app.register_blueprint(auth_bp)
 
     return app
 
@@ -280,7 +276,7 @@ def limite_intentos_excedido(error):
         return redirect(url_for('registro'))
 
     flash('Demasiados intentos de inicio de sesión. Por seguridad, espera un minuto e inténtalo de nuevo.', 'danger')
-    return redirect(url_for('login'))
+    return redirect(url_for('auth.login'))
 
 
 @app.errorhandler(413)
@@ -338,82 +334,6 @@ def error_interno(error):
     db.session.rollback()  # por si el error dejó la sesión de SQLAlchemy en un estado inconsistente
     return render_template('errores/500.html'), 500
 
-
-
-# ---------------------------------------------------------------------------
-# AUTENTICACIÓN
-# ---------------------------------------------------------------------------
-
-@app.route('/login', methods=['GET', 'POST'])
-@limiter.limit('5 per minute', methods=['POST'])
-def login():
-    if current_user.is_authenticated:
-        return redirect(url_for('index'))
-
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip().lower()
-        password = request.form.get('password', '')
-        recordar = request.form.get('recordar') == 'on'
-
-        usuario = Usuario.query.filter_by(username=username).first()
-
-        # Mensaje genérico a propósito: no revelamos si falló el usuario
-        # o la contraseña, para no facilitar enumeración de cuentas.
-        if usuario and usuario.activo and usuario.check_password(password):
-            session.permanent = True  # Activa PERMANENT_SESSION_LIFETIME (expira tras 8h de inactividad)
-            login_user(usuario, remember=recordar)
-            usuario.ultimo_acceso = ahora_utc()
-            db.session.commit()
-
-            flash(f'Bienvenido, {usuario.nombre_completo}.', 'success')
-            siguiente = request.args.get('next')
-            destino = siguiente if es_url_segura(siguiente) else url_for('index')
-            return redirect(destino)
-
-        flash('Usuario o contraseña incorrectos.', 'danger')
-
-    return render_template('login.html')
-
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash('Sesión cerrada correctamente.', 'success')
-    return redirect(url_for('login'))
-
-
-@app.route('/perfil', methods=['GET', 'POST'])
-@login_required
-def perfil():
-    """Cada usuario (Directivo o Administrativo) edita SU propia cuenta aquí."""
-    if request.method == 'POST':
-        nombre_completo = request.form.get('nombre_completo', '').strip()
-        if nombre_completo:
-            current_user.nombre_completo = nombre_completo
-
-        password_actual = request.form.get('password_actual', '')
-        password_nueva = request.form.get('password_nueva', '')
-        password_confirmar = request.form.get('password_confirmar', '')
-
-        if password_nueva or password_confirmar or password_actual:
-            if not current_user.check_password(password_actual):
-                flash('Tu contraseña actual no es correcta; no se cambió nada.', 'danger')
-                return redirect(url_for('perfil'))
-            if len(password_nueva) < 8:
-                flash('La nueva contraseña debe tener al menos 8 caracteres.', 'danger')
-                return redirect(url_for('perfil'))
-            if password_nueva != password_confirmar:
-                flash('La confirmación no coincide con la nueva contraseña.', 'danger')
-                return redirect(url_for('perfil'))
-            current_user.set_password(password_nueva)
-            flash('Contraseña actualizada correctamente.', 'success')
-
-        db.session.commit()
-        flash('Perfil actualizado.', 'success')
-        return redirect(url_for('perfil'))
-
-    return render_template('perfil.html')
 
 
 # ---------------------------------------------------------------------------

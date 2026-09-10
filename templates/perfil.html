@@ -59,7 +59,7 @@
                                 </div>
                             {% endif %}
                         {% endwith %}
-                        <form method="POST" action="{{ url_for('perfil') }}">
+                        <form method="POST" action="{{ url_for('auth.perfil') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <div class="section-block">
