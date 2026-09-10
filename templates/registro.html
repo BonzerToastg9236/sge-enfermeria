@@ -180,7 +180,7 @@
                             Control Escolar confirme tu documentación.
                         </p>
 
-                        <form action="{{ url_for('registro') }}" method="POST" class="needs-validation" novalidate id="formRegistro">
+                        <form action="{{ url_for('registro.registro') }}" method="POST" class="needs-validation" novalidate id="formRegistro">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <!-- DATOS PERSONALES -->

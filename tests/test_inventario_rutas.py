@@ -97,7 +97,7 @@ INVENTARIO_ESPERADO = [
     ('/perfil', ('GET', 'POST'), 'auth.perfil', None),
     ('/planes/<int:plan_id>/materias', ('GET', 'POST'), 'gestionar_materias', ('DIRECTIVO',)),
     ('/planes/mensualidades', ('GET', 'POST'), 'planes_mensualidades', ('DIRECTIVO',)),
-    ('/registro', ('GET', 'POST'), 'registro', None),
+    ('/registro', ('GET', 'POST'), 'registro.registro', None),
     ('/reportes/cartera-vencida', ('GET',), 'cartera_vencida', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
     ('/reportes/cartera-vencida/exportar', ('GET',), 'exportar_cartera_vencida', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
     ('/reportes/cobros-del-dia', ('GET',), 'reporte_cobros_del_dia', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
