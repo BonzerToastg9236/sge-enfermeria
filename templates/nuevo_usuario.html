@@ -26,7 +26,7 @@
         <div class="d-flex justify-content-between align-items-center mb-3 px-1">
             <span class="fw-semibold"><i class="bi bi-mortarboard-fill me-1"></i> SGE</span>
             <div class="d-flex gap-2">
-                <a href="{{ url_for('usuarios') }}" class="btn btn-light btn-sm fw-semibold">
+                <a href="{{ url_for('usuarios.usuarios') }}" class="btn btn-light btn-sm fw-semibold">
                     <i class="bi bi-arrow-left me-1"></i> Volver al listado
                 </a>
                 {% include '_nav.html' %}
@@ -56,7 +56,7 @@
                                 </div>
                             {% endif %}
                         {% endwith %}
-                        <form method="POST" action="{{ url_for('nuevo_usuario') }}">
+                        <form method="POST" action="{{ url_for('usuarios.nuevo_usuario') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <div class="mb-3">

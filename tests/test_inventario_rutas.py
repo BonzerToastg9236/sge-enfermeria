@@ -102,9 +102,9 @@ INVENTARIO_ESPERADO = [
     ('/reportes/cartera-vencida/exportar', ('GET',), 'exportar_cartera_vencida', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
     ('/reportes/cobros-del-dia', ('GET',), 'reporte_cobros_del_dia', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
     ('/reportes/cobros-del-dia/exportar', ('GET',), 'exportar_reporte_cobros_del_dia', ('DIRECTIVO', 'ADMINISTRATIVO', 'CONTADOR')),
-    ('/usuarios', ('GET',), 'usuarios', ('DIRECTIVO',)),
-    ('/usuarios/<int:user_id>/toggle', ('POST',), 'toggle_usuario', ('DIRECTIVO',)),
-    ('/usuarios/nuevo', ('GET', 'POST'), 'nuevo_usuario', ('DIRECTIVO',)),
+    ('/usuarios', ('GET',), 'usuarios.usuarios', ('DIRECTIVO',)),
+    ('/usuarios/<int:user_id>/toggle', ('POST',), 'usuarios.toggle_usuario', ('DIRECTIVO',)),
+    ('/usuarios/nuevo', ('GET', 'POST'), 'usuarios.nuevo_usuario', ('DIRECTIVO',)),
 ]
 
 
