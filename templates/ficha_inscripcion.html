@@ -147,7 +147,7 @@
                         </div>
                         <div class="foto-box">
                             {% if foto_alumno %}
-                                <img src="{{ url_for('ver_documento', matricula=alumno.matricula_id, doc_id=foto_alumno.id) }}" alt="Fotografía">
+                                <img src="{{ url_for('documentos.ver_documento', matricula=alumno.matricula_id, doc_id=foto_alumno.id) }}" alt="Fotografía">
                             {% else %}
                                 Fotografía
                             {% endif %}

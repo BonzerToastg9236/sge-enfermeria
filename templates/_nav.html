@@ -45,7 +45,7 @@
                     <i class="bi bi-folder2-open me-2 text-primary"></i> Expediente
                 </a>
                 {% if current_user.puede_alumnos() %}
-                    <a href="{{ url_for('documentos', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
+                    <a href="{{ url_for('documentos.documentos', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
                         <i class="bi bi-cloud-arrow-up me-2 text-primary"></i> Documentos
                     </a>
                     <a href="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="list-group-item list-group-item-action py-3">
