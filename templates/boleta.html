@@ -145,7 +145,7 @@
                         {% endwith %}
 
                         <!-- SELECTOR DE CUATRIMESTRE (recarga la lista de materias del "Escudo") -->
-                        <form method="GET" action="{{ url_for('boleta', matricula=alumno.matricula_id) }}" class="row g-2 align-items-end mb-4 no-imprimir">
+                        <form method="GET" action="{{ url_for('academico.boleta', matricula=alumno.matricula_id) }}" class="row g-2 align-items-end mb-4 no-imprimir">
                             <div class="col-auto">
                                 <label class="form-label mb-1"><i class="bi bi-funnel me-1"></i>{{ config_institucion.nombre_periodo_singular }} a capturar</label>
                                 <select name="cuatrimestre" class="form-select" onchange="this.form.submit()">
@@ -157,12 +157,12 @@
                                 </select>
                             </div>
                             <div class="col-auto">
-                                <a href="{{ url_for('historial_calificaciones', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
+                                <a href="{{ url_for('academico.historial_calificaciones', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
                                     <i class="bi bi-clock-history me-1"></i> Ver Historial de Cambios
                                 </a>
                             </div>
                             <div class="col-auto">
-                                <a href="{{ url_for('carga_academica', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
+                                <a href="{{ url_for('academico.carga_academica', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary">
                                     <i class="bi bi-journal-bookmark-fill me-1"></i> Carga Académica
                                 </a>
                             </div>
@@ -203,7 +203,7 @@
                                 </div>
                             </div>
 
-                            <form method="POST" action="{{ url_for('boleta', matricula=alumno.matricula_id, cuatrimestre=cuatrimestre_seleccionado) }}">
+                            <form method="POST" action="{{ url_for('academico.boleta', matricula=alumno.matricula_id, cuatrimestre=cuatrimestre_seleccionado) }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                                 <div class="row g-3 mb-3 no-imprimir">
