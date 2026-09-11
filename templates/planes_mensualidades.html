@@ -69,7 +69,7 @@
                                             <td>{{ plan.nombre }}</td>
                                             <td><code>{{ plan.clave_carrera }}-{{ plan.anio_generacion }}</code></td>
                                             <td>
-                                                <form method="POST" action="{{ url_for('planes_mensualidades') }}" class="input-group input-group-sm">
+                                                <form method="POST" action="{{ url_for('configuracion.planes_mensualidades') }}" class="input-group input-group-sm">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <input type="hidden" name="plan_id" value="{{ plan.id }}">
                                                     <span class="input-group-text">$</span>
@@ -83,7 +83,7 @@
                                                 </form>
                                             </td>
                                             <td>
-                                                <a href="{{ url_for('gestionar_materias', plan_id=plan.id) }}" class="btn btn-sm btn-outline-secondary">
+                                                <a href="{{ url_for('configuracion.gestionar_materias', plan_id=plan.id) }}" class="btn btn-sm btn-outline-secondary">
                                                     <i class="bi bi-journal-text me-1"></i> Materias
                                                 </a>
                                             </td>

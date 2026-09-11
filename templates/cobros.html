@@ -116,7 +116,7 @@
                                         {% if not conceptos_cobro %}
                                             <small class="text-danger">
                                                 No hay conceptos activos.
-                                                <a href="{{ url_for('conceptos_cobro') }}">Agrega uno primero</a>.
+                                                <a href="{{ url_for('configuracion.conceptos_cobro') }}">Agrega uno primero</a>.
                                             </small>
                                         {% endif %}
                                     </div>
@@ -292,7 +292,7 @@
                                             No hay nada que cobrar todavía.
                                             {% if current_user.es_directivo() %}
                                                 Captura el precio en
-                                                <a href="{{ url_for('conceptos_cobro') }}">Conceptos de Cobro</a>
+                                                <a href="{{ url_for('configuracion.conceptos_cobro') }}">Conceptos de Cobro</a>
                                                 y genera de nuevo el cargo con el monto correcto.
                                             {% else %}
                                                 Pídele a Dirección que capture el precio del concepto.

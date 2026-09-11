@@ -89,15 +89,15 @@
                     <a href="{{ url_for('recordatorios_vencimiento') }}" class="list-group-item list-group-item-action py-3">
                         <i class="bi bi-envelope-paper-fill me-2 text-primary"></i> Recordatorios de Vencimiento
                     </a>
-                    <a href="{{ url_for('conceptos_cobro') }}" class="list-group-item list-group-item-action py-3">
+                    <a href="{{ url_for('configuracion.conceptos_cobro') }}" class="list-group-item list-group-item-action py-3">
                         <i class="bi bi-tags-fill me-2 text-primary"></i> Catálogo de Conceptos
                     </a>
-                    <a href="{{ url_for('configuracion_cobros') }}" class="list-group-item list-group-item-action py-3">
+                    <a href="{{ url_for('configuracion.configuracion_cobros') }}" class="list-group-item list-group-item-action py-3">
                         <i class="bi bi-sliders me-2 text-primary"></i> Configuración de Recargos
                     </a>
                 {% endif %}
                 {% if current_user.es_directivo() %}
-                    <a href="{{ url_for('planes_mensualidades') }}" class="list-group-item list-group-item-action py-3">
+                    <a href="{{ url_for('configuracion.planes_mensualidades') }}" class="list-group-item list-group-item-action py-3">
                         <i class="bi bi-cash-stack me-2 text-primary"></i> Mensualidades por {{ config_institucion.nombre_programa_singular }}
                     </a>
                 {% endif %}
@@ -135,7 +135,7 @@
                 <a href="{{ url_for('usuarios.usuarios') }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-people me-2 text-secondary"></i> Administrativos
                 </a>
-                <a href="{{ url_for('configuracion_institucion') }}" class="list-group-item list-group-item-action py-3">
+                <a href="{{ url_for('configuracion.configuracion_institucion') }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-gear-fill me-2 text-secondary"></i> Configuración de la Institución
                 </a>
             {% endif %}

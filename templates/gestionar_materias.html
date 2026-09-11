@@ -38,7 +38,7 @@
             <div class="col-lg-9">
 
                 <div class="mb-2">
-                    <a href="{{ url_for('planes_mensualidades') }}" class="btn btn-outline-secondary btn-sm">
+                    <a href="{{ url_for('configuracion.planes_mensualidades') }}" class="btn btn-outline-secondary btn-sm">
                         <i class="bi bi-arrow-left me-1"></i> Volver a {{ config_institucion.nombre_programa_plural }}
                     </a>
                 </div>
@@ -60,7 +60,7 @@
                         {% endwith %}
 
                         <!-- ALTA DE MATERIA -->
-                        <form action="{{ url_for('gestionar_materias', plan_id=plan.id) }}" method="POST" class="row g-2 align-items-end mb-4 pb-4 border-bottom">
+                        <form action="{{ url_for('configuracion.gestionar_materias', plan_id=plan.id) }}" method="POST" class="row g-2 align-items-end mb-4 pb-4 border-bottom">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="col-md-4">
                                 <label class="form-label small">Nombre de la Materia</label>
@@ -106,7 +106,7 @@
                                                         <td>{{ materia.clave or '—' }}</td>
                                                         <td>{{ materia.creditos or '—' }}</td>
                                                         <td class="text-end">
-                                                            <form action="{{ url_for('eliminar_materia', materia_id=materia.id) }}" method="POST" class="d-inline"
+                                                            <form action="{{ url_for('configuracion.eliminar_materia', materia_id=materia.id) }}" method="POST" class="d-inline"
                                                                   onsubmit="return confirm('¿Eliminar \'{{ materia.nombre }}\'? Solo funciona si nunca se ha usado en boletas.');">
                                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                                 <button type="submit" class="btn btn-sm btn-outline-danger">
