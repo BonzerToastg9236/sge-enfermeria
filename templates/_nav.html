@@ -73,13 +73,13 @@
                 </small>
             </div>
             <div class="list-group list-group-flush">
-                <a href="{{ url_for('dashboard_cobros') }}" class="list-group-item list-group-item-action py-3">
+                <a href="{{ url_for('reportes.dashboard_cobros') }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-bar-chart-fill me-2 text-primary"></i> Dashboard de Cobros
                 </a>
-                <a href="{{ url_for('reporte_cobros_del_dia') }}" class="list-group-item list-group-item-action py-3">
+                <a href="{{ url_for('reportes.reporte_cobros_del_dia') }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-graph-up me-2 text-primary"></i> Reporte de Cobros del Día
                 </a>
-                <a href="{{ url_for('cartera_vencida') }}" class="list-group-item list-group-item-action py-3">
+                <a href="{{ url_for('reportes.cartera_vencida') }}" class="list-group-item list-group-item-action py-3">
                     <i class="bi bi-exclamation-triangle-fill me-2 text-danger"></i> Cartera Vencida
                 </a>
                 {% if current_user.es_directivo() or current_user.rol.name == 'CONTADOR' %}
