@@ -15,7 +15,7 @@ auth_bp = Blueprint('auth', __name__)
 @limiter.limit('5 per minute', methods=['POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('index'))
+        return redirect(url_for('alumnos.index'))
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
@@ -34,7 +34,7 @@ def login():
 
             flash(f'Bienvenido, {usuario.nombre_completo}.', 'success')
             siguiente = request.args.get('next')
-            destino = siguiente if es_url_segura(siguiente) else url_for('index')
+            destino = siguiente if es_url_segura(siguiente) else url_for('alumnos.index')
             return redirect(destino)
 
         flash('Usuario o contraseña incorrectos.', 'danger')

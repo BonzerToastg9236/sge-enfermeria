@@ -50,7 +50,7 @@ def rol_requerido(*roles_permitidos):
         def envoltura(*args, **kwargs):
             if current_user.rol.name not in roles_permitidos:
                 flash('No tienes permisos para realizar esta acción.', 'danger')
-                return redirect(url_for('index'))
+                return redirect(url_for('alumnos.index'))
             return func(*args, **kwargs)
         return envoltura
     return decorador

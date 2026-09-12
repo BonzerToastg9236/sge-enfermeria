@@ -116,7 +116,7 @@
             <div class="col-lg-8">
                 <div class="card shadow-lg border-0 rounded-4">
                     <div class="card-body p-4">
-                        <form action="{{ url_for('buscar') }}" method="POST">
+                        <form action="{{ url_for('alumnos.buscar') }}" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="input-group">
                                 <span class="input-group-text bg-white border-end-0">
@@ -166,7 +166,7 @@
                     </p>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='pendientes') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='pendientes') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos Pendientes de Validación' }}">
                             <div class="stat-numero text-warning">{{ estadisticas.pendientes }}</div>
                             <div class="stat-label">Pendientes de Validar</div>
@@ -174,7 +174,7 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='activos') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='activos') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos Activos' }}">
                             <div class="stat-numero text-success">{{ estadisticas.activos }}</div>
                             <div class="stat-label">Activos</div>
@@ -182,7 +182,7 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='documentacion') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='documentacion') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos con Documentación Pendiente' }}">
                             <div class="stat-numero text-danger">{{ estadisticas.documentacion_incompleta }}</div>
                             <div class="stat-label">Documentación Incompleta</div>
@@ -190,7 +190,7 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='faltas') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='faltas') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos con Faltas Administrativas' }}">
                             <div class="stat-numero text-secondary">{{ estadisticas.faltas }}</div>
                             <div class="stat-label">Con Faltas Admin.</div>
@@ -198,7 +198,7 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='con_adeudo') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='con_adeudo') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos con Adeudo Económico' }}">
                             <div class="stat-numero text-danger">{{ estadisticas.con_adeudo }}</div>
                             <div class="stat-label">Con Adeudo</div>
@@ -206,7 +206,7 @@
                     </a>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <a href="{{ url_for('index', filtro='recientes') }}" class="text-decoration-none">
+                    <a href="{{ url_for('alumnos.index', filtro='recientes') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Últimos 10 Alumnos Registrados' }}">
                             <div class="stat-numero text-primary">{{ estadisticas.total }}</div>
                             <div class="stat-label">Total de Alumnos</div>
@@ -239,7 +239,7 @@
                         {% endif %}
                     </p>
                     {% if titulo_filtro %}
-                        <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-secondary">
+                        <a href="{{ url_for('alumnos.index') }}" class="btn btn-sm btn-outline-secondary">
                             <i class="bi bi-x-lg me-1"></i> Quitar filtro
                         </a>
                     {% endif %}
@@ -274,7 +274,7 @@
                                 </div>
                             </div>
                             <div class="card-footer bg-white border-0 pt-0 pb-3 px-3 d-flex gap-2">
-                                <a href="{{ url_for('ver_expediente', matricula=alumno.matricula_id) }}" class="btn btn-outline-primary w-50">
+                                <a href="{{ url_for('alumnos.ver_expediente', matricula=alumno.matricula_id) }}" class="btn btn-outline-primary w-50">
                                     <i class="bi bi-folder2-open me-1"></i> Ver Expediente
                                 </a>
                                 <a href="{{ url_for('documentos.documentos', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary w-50">
@@ -292,7 +292,7 @@
                     <ul class="pagination justify-content-center">
                         <li class="page-item {{ 'disabled' if not paginacion.has_prev }}">
                             <a class="page-link"
-                               href="{{ url_for('index', filtro=filtro, q=termino, page=paginacion.prev_num) }}">
+                               href="{{ url_for('alumnos.index', filtro=filtro, q=termino, page=paginacion.prev_num) }}">
                                 <i class="bi bi-chevron-left"></i> Anterior
                             </a>
                         </li>
@@ -303,7 +303,7 @@
                         </li>
                         <li class="page-item {{ 'disabled' if not paginacion.has_next }}">
                             <a class="page-link"
-                               href="{{ url_for('index', filtro=filtro, q=termino, page=paginacion.next_num) }}">
+                               href="{{ url_for('alumnos.index', filtro=filtro, q=termino, page=paginacion.next_num) }}">
                                 Siguiente <i class="bi bi-chevron-right"></i>
                             </a>
                         </li>
@@ -316,7 +316,7 @@
                     <i class="bi bi-inboxes display-6 d-block mb-2 opacity-50"></i>
                     No hay alumnos que coincidan con "<strong>{{ titulo_filtro }}</strong>" en este momento.
                     <br>
-                    <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-secondary mt-2">
+                    <a href="{{ url_for('alumnos.index') }}" class="btn btn-sm btn-outline-secondary mt-2">
                         <i class="bi bi-x-lg me-1"></i> Quitar filtro
                     </a>
                 </div>
