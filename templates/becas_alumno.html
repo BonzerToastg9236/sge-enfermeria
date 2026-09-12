@@ -34,7 +34,7 @@
             <div class="col-lg-8">
 
                 <div class="mb-2">
-                    <a href="{{ url_for('cobros', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary btn-sm">
+                    <a href="{{ url_for('cobros.cobros', matricula=alumno.matricula_id) }}" class="btn btn-outline-secondary btn-sm">
                         <i class="bi bi-arrow-left me-1"></i> Volver a Cobros
                     </a>
                 </div>
@@ -63,7 +63,7 @@
                             ningún pago, se les ajusta el monto automáticamente.
                         </div>
 
-                        <form action="{{ url_for('becas_alumno', matricula=alumno.matricula_id) }}" method="POST" class="row g-2 align-items-end mb-4 pb-4 border-bottom">
+                        <form action="{{ url_for('cobros.becas_alumno', matricula=alumno.matricula_id) }}" method="POST" class="row g-2 align-items-end mb-4 pb-4 border-bottom">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="col-md-4">
                                 <label class="form-label small">Nombre de la Beca</label>
@@ -134,7 +134,7 @@
                                                 </td>
                                                 <td class="text-end">
                                                     {% if beca.activa %}
-                                                        <form action="{{ url_for('desactivar_beca', beca_id=beca.id) }}" method="POST" class="d-inline"
+                                                        <form action="{{ url_for('cobros.desactivar_beca', beca_id=beca.id) }}" method="POST" class="d-inline"
                                                               onsubmit="return confirm('¿Desactivar esta beca? Los cargos ya generados con el descuento no se revierten solos.');">
                                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                             <button type="submit" class="btn btn-sm btn-outline-danger">Desactivar</button>

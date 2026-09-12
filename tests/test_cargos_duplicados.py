@@ -209,7 +209,11 @@ def test_ruta_nuevo_cargo_maneja_bien_el_integrityerror_de_una_carrera(client, a
 
     _insertar_cargo_directo(alumno, concepto, '2026-B')  # "el otro proceso" ya ganó la carrera
 
-    with patch('app._cargo_duplicado', return_value=None):  # simula el check leyendo estado obsoleto
+    # El parche va sobre rutas.cobros (el módulo donde vive hoy la vista
+    # nuevo_cargo, que importó el nombre _cargo_duplicado a su propio
+    # espacio de nombres): parchear app._cargo_duplicado ya no afectaría a
+    # la vista. Mismo escenario y mismas aserciones que antes.
+    with patch('rutas.cobros._cargo_duplicado', return_value=None):  # simula el check leyendo estado obsoleto
         respuesta = client.post(f'/alumno/{alumno.matricula_id}/cobros/nuevo', data={
             'concepto_cobro_id': str(concepto.id), 'monto': '1000.00', 'periodo_escolar': '2026-B'
         }, follow_redirects=True)

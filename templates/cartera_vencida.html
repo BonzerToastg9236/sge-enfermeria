@@ -97,7 +97,7 @@
                                                    para todos los cargos). El valor ya viene calculado en fila.saldo. #}
                                                 <td class="text-end fw-bold text-danger">${{ '%.2f'|format(fila.saldo) }}</td>
                                                 <td class="text-end">
-                                                    <a href="{{ url_for('cobros', matricula=cargo.matricula_fk) }}" class="btn btn-sm btn-outline-primary">
+                                                    <a href="{{ url_for('cobros.cobros', matricula=cargo.matricula_fk) }}" class="btn btn-sm btn-outline-primary">
                                                         <i class="bi bi-cash-coin me-1"></i>Cobrar
                                                     </a>
                                                 </td>

@@ -81,7 +81,7 @@
                                     </tbody>
                                 </table>
                             </div>
-                            <form method="POST" action="{{ url_for('recordatorios_vencimiento') }}">
+                            <form method="POST" action="{{ url_for('cobros.recordatorios_vencimiento') }}">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-primary btn-enviar">
                                     <i class="bi bi-envelope-paper-fill me-1"></i> Enviar {{ candidatos|length }} Recordatorio(s) Ahora
