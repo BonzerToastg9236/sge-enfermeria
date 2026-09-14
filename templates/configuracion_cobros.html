@@ -59,7 +59,7 @@
                             cargos que sigan vencidos a partir de ahora.
                         </p>
 
-                        <form method="POST" action="{{ url_for('configuracion_cobros') }}">
+                        <form method="POST" action="{{ url_for('configuracion.configuracion_cobros') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <div class="mb-3">

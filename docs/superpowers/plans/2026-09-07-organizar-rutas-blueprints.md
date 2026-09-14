@@ -18,7 +18,7 @@
 - Do not undo fixes #1–#9 from the production audit (role guard on `ver_expediente`/`ficha_inscripcion`, the `with_for_update()` row lock in `registrar_pago`, the partial unique index on `Cargo`, the `/registro` rate limit, the endpoint-aware 429 handler, `MAIL_TIMEOUT`, magic-bytes file validation, the 413 handler, `MOTIVO_GENERICO_FALLO_CORREO`). Every task that touches one of these is flagged explicitly.
 - None of the 166 existing tests are modified. If a task appears to require editing one, stop — that means the task broke compatibility; fix the task, not the test.
 - `app.py` keeps re-exporting the 34 names listed in Appendix A, so `tests/`, `seed.py` and `crear_admin.py` keep working unmodified.
-- Run the full test suite (`./venv/bin/python -m pytest -q`) after every task and confirm the count only grows (166 at Task 0 start, 168 from Task 0 onward). A task is not done while any test is red.
+- Run the full test suite (`./venv/bin/python -m pytest -q`) after every task and confirm the count only grows (166 at Task 0 start, 169 from Task 0 onward (Task 0 adds 3 new test functions: 1 in test_integridad_urls.py + 2 in test_inventario_rutas.py)). A task is not done while any test is red.
 - Every commit message ends with the required attribution footer (see repo convention already in use).
 - **Every `app.py:X-Y` line reference in this plan is anchored to the frozen baseline snapshot described immediately below — never to the live, currently-mutating `app.py`.** Deleting lines in one step shifts every later line number in the file; without a frozen reference, later tasks' line numbers silently go stale.
 
@@ -365,7 +365,7 @@ baseline snapshot, not a red test.
 - [ ] **Step 5: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed` (166 existing + 2 new).
+Expected: `169 passed` (166 existing + 3 new: 1 in test_integridad_urls.py + 2 in test_inventario_rutas.py).
 
 - [ ] **Step 6: Commit**
 
@@ -529,7 +529,7 @@ where it's actually used.
 - [ ] **Step 4: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -656,6 +656,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from extensiones import db
+from utilidades.fechas import ahora_utc
 
 
 class RolUsuario(enum.Enum):
@@ -671,6 +672,10 @@ the verbatim block copied from the given `app.py` line range — read
 those lines from `app.py` before deleting them in Step 4, and paste
 their unmodified content in place of the marker. No line inside the
 range is edited.)
+
+**Confirmed dependency:** `Usuario.fecha_creacion` is `db.Column(db.DateTime,
+default=ahora_utc)` — same pattern as `Alumno.fecha_registro` below. The
+import above (`from utilidades.fechas import ahora_utc`) covers it.
 
 - [ ] **Step 2: Create `modelos/academico.py`**
 
@@ -717,6 +722,42 @@ task, before this step — `from utilidades.fechas import ahora_utc`
 module already exists on disk by the time this step runs. No forward
 reference, no reordering needed.
 
+**A second, more serious dependency, found by an AST-level check of the
+pasted body — this one IS circular, and needs a different fix.**
+`Alumno.saldo_total_adeudado()` (`app.py:517`, inside the `Alumno` class
+body) reads `EstatusCargo.CANCELADO`. `EstatusCargo` is defined in
+`modelos/cobros.py` (Step 3, below) — but `modelos/cobros.py` already
+imports `Alumno` and `PlanEstudio` from `modelos/academico.py` at module
+level (see Step 3's header). A module-level `from modelos.cobros import
+EstatusCargo` here would make the two files import each other at load
+time — Python raises `ImportError: cannot import name ... (most likely
+due to a circular import)` the moment either module is first imported.
+
+**Fix: a local import inside the one method that needs it**, not a
+module-level import. This is the standard, minimal way to break a model
+circular-import in SQLAlchemy codebases — the import only executes when
+the method is *called*, by which point both modules have already
+finished loading:
+
+```python
+def saldo_total_adeudado(self):
+    from modelos.cobros import EstatusCargo  # import local a propósito:
+    # evita el ciclo con modelos/cobros.py, que sí importa Alumno a
+    # nivel de módulo. Ver la nota de Task 2, Step 2 en el plan.
+    ...  # el resto del cuerpo, sin más cambios
+```
+
+This is the **one** exception in this entire plan to "move verbatim,
+zero edits inside the function body" — everywhere else in Tasks 1–13,
+moving code means literally zero lines changed inside a function. Here,
+one `import` line is added at the top of one method, because the plan's
+own file split (an artifact of Task 2, not of the original code) is what
+introduces the circularity — the line doesn't exist in `app.py` today
+because `app.py` never had this problem (everything was one file). Do
+not "clean this up" by moving the import to module level later; it must
+stay local to break the cycle for as long as `academico.py` and
+`cobros.py` stay separate files.
+
 - [ ] **Step 3: Create `modelos/cobros.py`**
 
 Move verbatim from `app.py`, in this order:
@@ -749,6 +790,7 @@ from sqlalchemy import UniqueConstraint, CheckConstraint, Index, text
 
 from extensiones import db
 from modelos.academico import Alumno, PlanEstudio
+from utilidades.fechas import ahora_utc, hoy_local
 
 # <-- pegar aquí, en el orden de arriba, cada clase verbatim -->
 ```
@@ -758,6 +800,15 @@ actually references (e.g. only include `UniqueConstraint`,
 `CheckConstraint`, `Index`, `text` if the pasted `Cargo`/other class
 bodies use them — verify with `grep` on the pasted content, don't
 guess).
+
+**Confirmed dependencies** (verified against `app.py`, not guessed):
+`Cargo.fecha_generacion` is `db.Column(db.DateTime, default=ahora_utc)`;
+`Cargo.esta_vencido()`/`actualizar_recargo_si_vencido()` call
+`hoy_local()`; `Pago.fecha_pago` is `db.Column(db.DateTime,
+default=ahora_utc, index=True)`. Both `ahora_utc` and `hoy_local` are
+covered by the import added above — no circularity here (`modelos/cobros.py`
+depending on `utilidades/fechas.py` is the intended direction, same as
+`modelos/academico.py`).
 
 - [ ] **Step 4: Remove the moved lines from `app.py`**
 
@@ -829,7 +880,7 @@ it confirms "no changes").
 - [ ] **Step 8: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 9: Commit**
 
@@ -960,16 +1011,26 @@ Move verbatim from `app.py`:
 ```python
 """Generación de folios consecutivos y libres de condición de carrera para pagos/documentos."""
 
+from sqlalchemy.exc import IntegrityError
+
 from extensiones import db
 from modelos import ContadorFolio
+from utilidades.fechas import hoy_local
 
 def siguiente_folio(tipo: str, prefijo: str, digitos: int = 6, intentos_maximos: int = 5) -> str:
     # <-- pegar aquí, verbatim (app.py:1136-1184) -->
 ```
 
-(Verify the exact imports `siguiente_folio`'s body needs — `IntegrityError`
-handling if present — with `grep -n "IntegrityError\|db\.session" app.py`
-in that line range before finalizing the header.)
+**Confirmed:** the body calls `hoy_local().year` and has `except
+IntegrityError:` (retry-on-collision, guarding against two requests
+racing to create the same `(tipo, año)` counter row) — both imports
+above are required, not speculative. Note `utilidades/folios.py`
+importing from `modelos` is a deliberate, working exception to the
+"utilidades sits below modelos" layering description in this plan's
+Architecture section: it does not create a circular import (nothing in
+`modelos/` imports `utilidades.folios`), it just means this one file is
+slightly higher in the practical dependency chain than a "pure utility"
+would be. Not a defect — ruled acceptable, see the ledger.
 
 - [ ] **Step 5: Create `utilidades/paginacion.py`**
 
@@ -1049,7 +1110,7 @@ registration call stays in `app.py`, only the function bodies moved.
 - [ ] **Step 9: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 10: Commit**
 
@@ -1082,17 +1143,20 @@ Move verbatim from `app.py`:
 ```python
 """Generación de matrícula única y alta de un Alumno con reintento ante colisión."""
 
+from sqlalchemy.exc import IntegrityError
+
 from extensiones import db
 from modelos import Alumno
+from utilidades.fechas import ahora_utc
 
 # <-- pegar aquí generar_matricula, verbatim (app.py:1852-1898) -->
 
 # <-- pegar aquí crear_alumno_generando_matricula, verbatim (app.py:1899-1927) -->
 ```
 
-(Confirm the exact import list against what these two functions actually
-reference — e.g. `IntegrityError`, `secure_filename` — with `grep` over
-that line range before finalizing.)
+**Confirmed:** `generar_matricula` uses `ahora_utc().year` and the retry
+loop has `except IntegrityError:` (same collision-retry pattern as
+`siguiente_folio`) — both imports above are required.
 
 - [ ] **Step 2: Create `servicios/alumnos.py`**
 
@@ -1142,11 +1206,16 @@ from datetime import datetime, date
 
 from extensiones import db
 from modelos import Cargo, EstatusCargo, ConceptoCobro
+from utilidades.fechas import hoy_local, periodo_escolar_actual
 
 MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
 # <-- pegar aquí, en el orden de arriba, cada función verbatim -->
 ```
+
+**Confirmed:** `_meses_del_cuatrimestre_actual`/`_vencimiento_dia_10_sugerido`
+call `hoy_local()`; `_generar_cargos_de_periodo` calls
+`periodo_escolar_actual()`. Both imports above are required.
 
 - [ ] **Step 4: Create `servicios/academico.py`**
 
@@ -1169,21 +1238,20 @@ from modelos import (
     HistorialCalificacion,
 )
 from servicios.cobros import _generar_cargos_de_reinscripcion
+from utilidades.fechas import periodo_escolar_actual
 from utilidades.folios import siguiente_folio
 
 # <-- pegar aquí, en el orden de arriba, cada función verbatim -->
 ```
 
-**Confirmed dependency (verified, not speculative):** `_siguiente_numero_acta`
-(`app.py:4611`) calls `siguiente_folio(tipo='ACTA', prefijo='ACTA',
-digitos=6)` — that's why `utilidades.folios.siguiente_folio` is imported
-above. `utilidades/folios.py` is created earlier in this same task's
-dependency chain (Task 3, Step 4), so it already exists by the time this
-step runs. Also verify with `grep -n "ahora_utc\|hoy_local"` over the
-exact pasted range whether any of the other 4 functions need
-`utilidades.fechas` imports too — none were found in the line ranges
-above during planning, but confirm against the real content before
-finalizing.
+**Confirmed dependencies (verified against `app.py`, not speculative):**
+`_siguiente_numero_acta` (`app.py:4611`) calls
+`siguiente_folio(tipo='ACTA', prefijo='ACTA', digitos=6)`; one of
+`_max_periodos`/`_generar_carga_academica`/`_avanzar_cuatrimestre` calls
+`periodo_escolar_actual()`. Both `utilidades.folios.siguiente_folio` and
+`utilidades.fechas.periodo_escolar_actual` are imported above to cover
+them. `utilidades/folios.py` and `utilidades/fechas.py` both already
+exist by the time this step runs (Task 3, earlier steps).
 
 - [ ] **Step 5: Create `servicios/reportes.py`**
 
@@ -1199,11 +1267,19 @@ Move verbatim from `app.py`:
 from sqlalchemy import func
 
 from extensiones import db
-from modelos import Cargo, EstatusCargo, Pago
+from modelos import Cargo, EstatusCargo, Pago, ConfiguracionCobros
 from utilidades.fechas import hoy_local, rango_utc_del_dia
+from servicios.cobros import MESES_ES
 
 # <-- pegar aquí, en el orden de arriba, cada función verbatim -->
 ```
+
+**Confirmed:** `_calcular_reporte_cobros_del_dia`/`_calcular_cartera_vencida`
+call `ConfiguracionCobros.obtener()`; `_calcular_dashboard_cobros` indexes
+`MESES_ES[mes_ref]` — `MESES_ES` is defined in `servicios/cobros.py`
+(Task 4, Step 3, already created earlier in this same task), imported
+above rather than redefined here to avoid two different lists drifting
+apart.
 
 - [ ] **Step 6: Create `servicios/correo.py`**
 
@@ -1336,7 +1412,7 @@ from servicios.correo import (
 - [ ] **Step 9: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically the two tests tied to fixes touched in this task:
 `./venv/bin/python -m pytest tests/test_correo_timeout.py tests/test_errores_smtp_no_expuestos.py tests/test_precios_por_institucion.py tests/test_cargos_duplicados.py -v`
@@ -1391,6 +1467,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from extensiones import db, limiter
 from modelos import Usuario
 from utilidades.seguridad import es_url_segura
+from utilidades.fechas import ahora_utc
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -1471,7 +1548,7 @@ Change exactly these 3 rows' 3rd field (endpoint), nothing else:
 - [ ] **Step 7: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`. Also explicitly:
+Expected: `169 passed`. Also explicitly:
 `./venv/bin/python -m pytest tests/test_integridad_urls.py tests/test_inventario_rutas.py tests/test_autenticacion_roles.py -v`
 Expected: all pass.
 
@@ -1512,6 +1589,7 @@ Move verbatim from `app.py`:
 """Alta y administración de cuentas de personal (DIRECTIVO)."""
 
 from flask import Blueprint, render_template, request, flash, redirect, url_for
+from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
 from modelos import Usuario, RolUsuario
@@ -1572,7 +1650,7 @@ correctly excludes from matching the old bare form).
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 7: Commit**
 
@@ -1612,7 +1690,7 @@ from flask import Blueprint, render_template, request, flash, redirect, url_for
 from markupsafe import escape
 
 from extensiones import db, limiter
-from modelos import PlanEstudio
+from modelos import Alumno, PlanEstudio, EstatusAlumno, TurnoAlumno, ModalidadEstudio
 from servicios.matriculas import crear_alumno_generando_matricula
 
 registro_bp = Blueprint('registro', __name__)
@@ -1684,7 +1762,7 @@ rather than folded into a blanket `sed`).
 - [ ] **Step 7: Run the full suite, with special attention to rate-limit tests**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_rate_limit_registro.py tests/test_xss_mensajes_registro.py tests/test_registro_publico.py -v`
 Expected: all pass — these three files directly exercise fixes #4 and
@@ -1739,6 +1817,8 @@ from extensiones import db
 from modelos import Alumno, DocumentoAlumno, TipoDocumento
 from utilidades.seguridad import rol_requerido
 from utilidades.archivos import extension_permitida, contenido_coincide_con_extension
+from utilidades.fechas import ahora_utc
+from servicios.academico import _max_periodos
 
 documentos_bp = Blueprint('documentos', __name__)
 
@@ -1808,7 +1888,7 @@ itself must never appear inside a `url_for(...)` string.
 - [ ] **Step 6: Run the full suite, with special attention to file validation**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_validacion_archivos.py -v`
 Expected: all pass — this is the fix #7 test file, exercising exactly
@@ -1872,7 +1952,10 @@ from openpyxl.utils import get_column_letter
 from flask import Blueprint, render_template, request, flash, redirect, url_for, send_file
 
 from extensiones import db
-from modelos import Alumno, Materia, PlanEstudio, Calificacion, InscripcionMateria
+from modelos import (
+    Alumno, Materia, PlanEstudio, Calificacion, InscripcionMateria,
+    EstatusAlumno, HistorialCalificacion,
+)
 from utilidades.seguridad import rol_requerido
 from utilidades.fechas import periodo_escolar_actual
 from servicios.academico import _max_periodos, _registrar_historial_calificacion, _siguiente_numero_acta
@@ -1960,7 +2043,7 @@ re-run the verification grep anyway rather than assuming.
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_escudo_plan_estudios.py -v`
 Expected: all pass — this file exercises the "Escudo del Plan de
@@ -2029,8 +2112,12 @@ from decimal import Decimal, InvalidOperation
 from flask import Blueprint, render_template, request, flash, redirect, url_for
 
 from extensiones import db
-from modelos import PlanEstudio, Materia, ConceptoCobro, ConfiguracionCobros, ConfiguracionInstitucion
+from modelos import (
+    PlanEstudio, Materia, ConceptoCobro, ConfiguracionCobros, ConfiguracionInstitucion,
+    Calificacion, InscripcionMateria, TipoRecargo,
+)
 from utilidades.seguridad import rol_requerido
+from servicios.academico import _max_periodos
 
 configuracion_bp = Blueprint('configuracion', __name__)
 
@@ -2123,7 +2210,7 @@ appears as a prefix of the other two names).
 - [ ] **Step 6: Run the full suite, with special attention to the pricing rules**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically: `./venv/bin/python -m pytest tests/test_precios_por_institucion.py tests/test_recargos_y_conceptos.py tests/test_configuracion_institucion.py -v`
 Expected: all pass, including the 3 role-restriction tests
@@ -2183,7 +2270,7 @@ from flask import Blueprint, render_template, request, send_file
 from extensiones import db
 from modelos import Cargo, EstatusCargo, Pago
 from utilidades.seguridad import rol_requerido
-from utilidades.fechas import hoy_local
+from utilidades.fechas import hoy_local, ahora_utc
 from utilidades.paginacion import _paginar_lista, CARGOS_POR_PAGINA
 from servicios.reportes import (
     _calcular_reporte_cobros_del_dia, _calcular_cartera_vencida,
@@ -2268,7 +2355,7 @@ Expected: no output.
 - [ ] **Step 6: Run the full suite**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 - [ ] **Step 7: Commit**
 
@@ -2338,12 +2425,16 @@ mecanismo. Esta función se mueve sin editar una sola línea de su cuerpo.
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, flash, redirect, url_for, abort
+from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
-from modelos import Cargo, EstatusCargo, Pago, Beca, ConceptoCobro, MetodoPago, Alumno
+from modelos import (
+    Cargo, EstatusCargo, Pago, Beca, ConceptoCobro, MetodoPago, Alumno,
+    EstatusAlumno, TipoDescuentoBeca,
+)
 from utilidades.seguridad import rol_requerido
-from utilidades.fechas import hoy_local
-from servicios.cobros import _cargo_duplicado, _vencimiento_dia_10_sugerido
+from utilidades.fechas import hoy_local, ahora_utc, periodo_escolar_actual
+from servicios.cobros import _cargo_duplicado, _vencimiento_dia_10_sugerido, _monto_mensualidad_con_beca
 from servicios.correo import enviar_comprobante_pago, enviar_recordatorio_vencimiento, DIAS_AVISO_VENCIMIENTO
 
 cobros_bp = Blueprint('cobros', __name__)
@@ -2504,7 +2595,7 @@ rename in this whole plan that reads unusually and is worth eyeballing.
 - [ ] **Step 7: Run the full suite, with mandatory focus on the concurrency test**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically:
 `./venv/bin/python -m pytest tests/test_concurrencia_pagos.py tests/test_cargos_duplicados.py tests/test_cargos_saldo_cero.py tests/test_correo_timeout.py tests/test_errores_smtp_no_expuestos.py -v`
@@ -2580,15 +2671,20 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from flask import Blueprint, render_template, request, flash, redirect, url_for, send_file
+from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
-from modelos import Alumno, EstatusAlumno, PlanEstudio, HistorialEstatus
+from modelos import (
+    Alumno, EstatusAlumno, PlanEstudio, HistorialEstatus,
+    Materia, DocumentoAlumno, TipoDocumento, TurnoAlumno, ModalidadEstudio,
+)
 from utilidades.seguridad import rol_requerido
-from utilidades.fechas import periodo_escolar_actual
+from utilidades.fechas import periodo_escolar_actual, ahora_utc
 from utilidades.paginacion import _paginar_lista, ALUMNOS_POR_PAGINA
 from servicios.alumnos import calcular_estadisticas_alumnos, _matriculas_con_adeudo
-from servicios.academico import _avanzar_cuatrimestre, _max_periodos
+from servicios.academico import _avanzar_cuatrimestre, _max_periodos, _generar_carga_academica
 from servicios.matriculas import crear_alumno_generando_matricula
+from servicios.cobros import _generar_cargos_de_inscripcion
 
 alumnos_bp = Blueprint('alumnos', __name__)
 
@@ -2720,7 +2816,7 @@ inside `url_for('avanzar_cuatrimestre_lote'` because character 24 differs,
 - [ ] **Step 7: Run the full suite, with mandatory focus on fix #1's test**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`.
+Expected: `169 passed`.
 
 Run specifically:
 `./venv/bin/python -m pytest tests/test_autenticacion_roles.py tests/test_matricula.py tests/test_registro_publico.py -v`
@@ -2883,7 +2979,7 @@ Expected: the `rm` succeeds; the `grep` afterward returns nothing (confirms it w
 - [ ] **Step 8: Full suite, one final time**
 
 Run: `./venv/bin/python -m pytest -q`
-Expected: `168 passed`, zero warnings, zero skips beyond what already
+Expected: `169 passed`, zero warnings, zero skips beyond what already
 existed before this plan (there were none).
 
 - [ ] **Step 9: Manual smoke test — app actually starts**

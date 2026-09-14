@@ -79,7 +79,7 @@
                                     </p>
                                 </div>
                             </div>
-                            <form action="{{ url_for('plantilla_boletas') }}" method="GET" class="row g-2 align-items-end">
+                            <form action="{{ url_for('academico.plantilla_boletas') }}" method="GET" class="row g-2 align-items-end">
                                 <div class="col-md-5">
                                     <label class="form-label small">{{ config_institucion.nombre_programa_singular }}</label>
                                     <select class="form-select" name="plan_id" required>
@@ -132,7 +132,7 @@
                                     </p>
                                 </div>
                             </div>
-                            <form action="{{ url_for('importar_boletas') }}" method="POST" enctype="multipart/form-data" class="row g-2 align-items-end">
+                            <form action="{{ url_for('academico.importar_boletas') }}" method="POST" enctype="multipart/form-data" class="row g-2 align-items-end">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="col-md-4">
                                     <label class="form-label small">{{ config_institucion.nombre_programa_singular }}</label>

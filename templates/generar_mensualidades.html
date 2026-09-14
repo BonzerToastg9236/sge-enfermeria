@@ -60,7 +60,7 @@
                             periodo, se omiten automáticamente (verás el detalle abajo).
                         </div>
 
-                        <form method="POST" action="{{ url_for('generar_mensualidades') }}" class="row g-3 mb-4">
+                        <form method="POST" action="{{ url_for('cobros.generar_mensualidades') }}" class="row g-3 mb-4">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="col-md-6">
                                 <label class="form-label fw-semibold">Concepto</label>

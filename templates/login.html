@@ -73,7 +73,7 @@
                             {% endif %}
                         {% endwith %}
 
-                        <form method="POST" action="{{ url_for('login') }}">
+                        <form method="POST" action="{{ url_for('auth.login') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="mb-3">
                                 <label for="username" class="form-label fw-semibold">Usuario</label>
@@ -100,7 +100,7 @@
                 </div>
                 <p class="text-center text-white-50 small mt-3">
                     ¿Buscas registrarte como alumno de nuevo ingreso?
-                    <a href="{{ url_for('registro') }}" class="text-white fw-semibold">Ve al registro público</a>
+                    <a href="{{ url_for('registro.registro') }}" class="text-white fw-semibold">Ve al registro público</a>
                 </p>
             </div>
         </div>

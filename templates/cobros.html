@@ -97,13 +97,13 @@
                         <!-- NUEVO CARGO (Directivo y Contador) -->
                         {% if current_user.puede_gestionar_cargos() %}
                             <div class="text-end mb-2">
-                                <a href="{{ url_for('becas_alumno', matricula=alumno.matricula_id) }}" class="btn btn-outline-success btn-sm">
+                                <a href="{{ url_for('cobros.becas_alumno', matricula=alumno.matricula_id) }}" class="btn btn-outline-success btn-sm">
                                     <i class="bi bi-award-fill me-1"></i> Becas y Descuentos
                                 </a>
                             </div>
                             <div class="section-block">
                                 <div class="fw-bold mb-3"><i class="bi bi-plus-circle me-1"></i> Agregar Cargo</div>
-                                <form action="{{ url_for('nuevo_cargo', matricula=alumno.matricula_id) }}" method="POST" class="row g-2 align-items-end">
+                                <form action="{{ url_for('cobros.nuevo_cargo', matricula=alumno.matricula_id) }}" method="POST" class="row g-2 align-items-end">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <div class="col-md-4">
                                         <label class="form-label small">Concepto</label>
@@ -116,7 +116,7 @@
                                         {% if not conceptos_cobro %}
                                             <small class="text-danger">
                                                 No hay conceptos activos.
-                                                <a href="{{ url_for('conceptos_cobro') }}">Agrega uno primero</a>.
+                                                <a href="{{ url_for('configuracion.conceptos_cobro') }}">Agrega uno primero</a>.
                                             </small>
                                         {% endif %}
                                     </div>
@@ -221,7 +221,7 @@
                                                             {% if pago.folio %}&middot; <code>{{ pago.folio }}</code>{% endif %}
                                                         </span>
                                                         <span class="d-flex align-items-center gap-2">
-                                                            <a href="{{ url_for('recibo_pago', pago_id=pago.id) }}" class="text-decoration-none small">
+                                                            <a href="{{ url_for('cobros.recibo_pago', pago_id=pago.id) }}" class="text-decoration-none small">
                                                                 <i class="bi bi-receipt"></i> Recibo
                                                             </a>
                                                             {% if current_user.puede_gestionar_cargos() %}
@@ -234,7 +234,7 @@
                                                     </div>
                                                     {% if current_user.puede_gestionar_cargos() %}
                                                         <div class="collapse mb-2" id="anular{{ pago.id }}">
-                                                            <form action="{{ url_for('anular_pago', pago_id=pago.id) }}" method="POST"
+                                                            <form action="{{ url_for('cobros.anular_pago', pago_id=pago.id) }}" method="POST"
                                                                   class="d-flex gap-2 align-items-start mt-1"
                                                                   onsubmit="return confirm('¿Anular este pago de ${{ '%.2f'|format(pago.monto_pagado) }}? El saldo pendiente del cargo se va a recalcular.');">
                                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -256,7 +256,7 @@
                                        inválido, y cualquier monto positivo por exceder el saldo.
                                        Esta condición alinea la vista con esa regla del backend. #}
                                     {% if cargo.estatus.name not in ('PAGADO', 'CANCELADO') and cargo.saldo_pendiente() > 0 %}
-                                        <form action="{{ url_for('registrar_pago', cargo_id=cargo.id) }}" method="POST" class="row g-2 align-items-end mt-3">
+                                        <form action="{{ url_for('cobros.registrar_pago', cargo_id=cargo.id) }}" method="POST" class="row g-2 align-items-end mt-3">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <div class="col-md-3">
                                                 <input type="number" step="0.01" min="0.01" max="{{ cargo.saldo_pendiente() }}"
@@ -292,7 +292,7 @@
                                             No hay nada que cobrar todavía.
                                             {% if current_user.es_directivo() %}
                                                 Captura el precio en
-                                                <a href="{{ url_for('conceptos_cobro') }}">Conceptos de Cobro</a>
+                                                <a href="{{ url_for('configuracion.conceptos_cobro') }}">Conceptos de Cobro</a>
                                                 y genera de nuevo el cargo con el monto correcto.
                                             {% else %}
                                                 Pídele a Dirección que capture el precio del concepto.
@@ -305,7 +305,7 @@
                                             <summary class="small text-muted" style="cursor: pointer;">
                                                 <i class="bi bi-pencil-square me-1"></i>Condonar / ajustar recargo
                                             </summary>
-                                            <form action="{{ url_for('condonar_recargo', cargo_id=cargo.id) }}" method="POST" class="row g-2 align-items-end mt-2">
+                                            <form action="{{ url_for('cobros.condonar_recargo', cargo_id=cargo.id) }}" method="POST" class="row g-2 align-items-end mt-2">
                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                 <div class="col-md-3">
                                                     <label class="form-label small">Nuevo recargo</label>
@@ -329,7 +329,7 @@
                                     {% endif %}
 
                                     {% if current_user.puede_gestionar_cargos() and cargo.estatus.name != 'CANCELADO' %}
-                                        <form action="{{ url_for('cancelar_cargo', cargo_id=cargo.id) }}" method="POST" class="mt-2"
+                                        <form action="{{ url_for('cobros.cancelar_cargo', cargo_id=cargo.id) }}" method="POST" class="mt-2"
                                               onsubmit="return confirm('¿Cancelar el cargo \'{{ cargo.concepto }}\'? Esta acción no se puede deshacer.');">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <button type="submit" class="btn btn-outline-danger btn-sm">

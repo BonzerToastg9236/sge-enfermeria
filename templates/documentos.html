@@ -173,7 +173,7 @@
                             </div>
                         </div>
 
-                        <form action="{{ url_for('documentos', matricula=alumno.matricula_id) }}" method="POST" enctype="multipart/form-data">
+                        <form action="{{ url_for('documentos.documentos', matricula=alumno.matricula_id) }}" method="POST" enctype="multipart/form-data">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <!-- DATOS COMPLEMENTARIOS -->
@@ -325,7 +325,7 @@
                             <div class="section-block mt-2">
                                 <div class="section-title"><i class="bi bi-folder-check"></i> Documentos ya subidos</div>
                                 {% for doc in documentos %}
-                                    {% set url_doc = url_for('ver_documento', matricula=alumno.matricula_id, doc_id=doc.id) %}
+                                    {% set url_doc = url_for('documentos.ver_documento', matricula=alumno.matricula_id, doc_id=doc.id) %}
                                     {% set es_pdf = doc.nombre_archivo_original.lower().endswith('.pdf') %}
                                     <div class="documento-existente">
                                         <span>
@@ -346,7 +346,7 @@
                                             </button>
                                             {% if current_user.es_directivo() %}
                                             <form
-                                                action="{{ url_for('eliminar_documento', doc_id=doc.id) }}"
+                                                action="{{ url_for('documentos.eliminar_documento', doc_id=doc.id) }}"
                                                 method="POST"
                                                 onsubmit="return confirm('¿Seguro que quieres eliminar este documento ({{ doc.tipo_documento.value }})? Esta acción no se puede deshacer.');"
                                             >

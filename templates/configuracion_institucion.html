@@ -64,7 +64,7 @@
                             </ul>
                         </div>
 
-                        <form action="{{ url_for('configuracion_institucion') }}" method="POST">
+                        <form action="{{ url_for('configuracion.configuracion_institucion') }}" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                             <div class="mb-4">

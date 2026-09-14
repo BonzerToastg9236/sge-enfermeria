@@ -51,7 +51,7 @@
                             {% endif %}
                         {% endwith %}
 
-                        <form action="{{ url_for('conceptos_cobro') }}" method="POST" class="row g-2 align-items-end mb-4">
+                        <form action="{{ url_for('configuracion.conceptos_cobro') }}" method="POST" class="row g-2 align-items-end mb-4">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="col-md-5">
                                 <label class="form-label">Nuevo Concepto</label>
@@ -91,7 +91,7 @@
                                                 {% endif %}
                                             </td>
                                             <td>
-                                                <form action="{{ url_for('editar_precio_concepto', concepto_id=concepto.id) }}" method="POST" class="d-flex align-items-center gap-2">
+                                                <form action="{{ url_for('configuracion.editar_precio_concepto', concepto_id=concepto.id) }}" method="POST" class="d-flex align-items-center gap-2">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <div class="input-group input-group-sm" style="max-width: 160px;">
                                                         <span class="input-group-text">$</span>
@@ -120,7 +120,7 @@
                                                 {% endif %}
                                             </td>
                                             <td class="text-end">
-                                                <form action="{{ url_for('toggle_concepto_cobro', concepto_id=concepto.id) }}" method="POST" class="d-inline">
+                                                <form action="{{ url_for('configuracion.toggle_concepto_cobro', concepto_id=concepto.id) }}" method="POST" class="d-inline">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <button type="submit" class="btn btn-sm {{ 'btn-outline-danger' if concepto.activo else 'btn-outline-success' }}">
                                                         {% if concepto.activo %}Desactivar{% else %}Activar{% endif %}
