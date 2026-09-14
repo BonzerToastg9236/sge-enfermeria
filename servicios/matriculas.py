@@ -3,7 +3,7 @@
 from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
-from modelos import Alumno
+from modelos import Alumno, PlanEstudio
 from utilidades.fechas import ahora_utc
 
 
