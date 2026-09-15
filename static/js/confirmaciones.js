@@ -30,3 +30,17 @@ document.querySelectorAll('.js-confirm-eliminar-materia').forEach((form) => {
     if (!confirm(msg)) evento.preventDefault();
   });
 });
+
+// A diferencia de los de arriba, este NO usa data-*: el valor a
+// confirmar es lo que el operador ACABA de escribir en su propio
+// formulario (periodo_escolar), no un dato ya guardado de otro usuario
+// -- se lee directo del campo al momento del submit.
+document.querySelectorAll('.js-confirm-beca-anual').forEach((form) => {
+  form.addEventListener('submit', (evento) => {
+    const periodo = form.elements.periodo_escolar.value.trim();
+    if (/^\d{4}$/.test(periodo)) {
+      const msg = `Esta beca aplicará a TODOS los periodos de ${periodo}, no solo a uno. ¿Continuar?`;
+      if (!confirm(msg)) evento.preventDefault();
+    }
+  });
+});

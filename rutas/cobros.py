@@ -11,6 +11,7 @@ deploy/PENDIENTES_PRODUCCION.md §1 para el detalle verificado del
 mecanismo. Esta función se mueve sin editar una sola línea de su cuerpo.
 """
 
+import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -29,6 +30,11 @@ from servicios.cobros import _cargo_duplicado, _vencimiento_dia_10_sugerido, _mo
 from servicios.correo import enviar_comprobante_pago, enviar_recordatorio_vencimiento, DIAS_AVISO_VENCIMIENTO
 
 cobros_bp = Blueprint('cobros', __name__)
+
+# Año solo ("2026", beca anual -- Cargo.periodo_escolar.like() de abajo lo
+# empareja a propósito contra TODOS los periodos de ese año) o año-letra
+# ("2026-B", un solo cuatrimestre). Nunca texto arbitrario.
+PERIODO_ESCOLAR_BECA_REGEX = re.compile(r'^\d{4}(-[A-Z])?$')
 
 
 @cobros_bp.route('/alumno/<matricula>/cobros')
@@ -92,6 +98,11 @@ def becas_alumno(matricula):
             errores.append('Selecciona el tipo de descuento (porcentaje o monto fijo).')
         if not periodo_escolar:
             errores.append('Indica el periodo escolar de vigencia (ej. "2026-B").')
+        elif not PERIODO_ESCOLAR_BECA_REGEX.match(periodo_escolar):
+            errores.append(
+                'El periodo escolar debe ser un año ("2026", aplica a todo el año) '
+                'o año y cuatrimestre ("2026-B").'
+            )
 
         valor = None
         try:
