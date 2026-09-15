@@ -9,6 +9,7 @@ $0 automáticamente -- no alterar esa regla al mover estas rutas.
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, flash, redirect, url_for
+from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
 from modelos import (
@@ -178,8 +179,18 @@ def conceptos_cobro():
         else:
             nuevo = ConceptoCobro(nombre=nombre, monto_sugerido=monto_sugerido, es_mensualidad=es_mensualidad, activo=True)
             db.session.add(nuevo)
-            db.session.commit()
-            flash(f'Concepto "{nombre}" agregado al catálogo.', 'success')
+            try:
+                db.session.commit()
+                flash(f'Concepto "{nombre}" agregado al catálogo.', 'success')
+            except IntegrityError:
+                # Índice único parcial (migración b0e4f9d2a1c7): a lo más un
+                # concepto puede ser es_mensualidad=True y activo=True.
+                db.session.rollback()
+                flash(
+                    'Ya existe un concepto marcado como mensualidad activo. '
+                    'Desactívalo antes de marcar otro.',
+                    'danger'
+                )
 
         return redirect(url_for('configuracion.conceptos_cobro'))
 
@@ -211,9 +222,17 @@ def editar_precio_concepto(concepto_id):
 
     concepto.monto_sugerido = monto_sugerido
     concepto.es_mensualidad = es_mensualidad
-    db.session.commit()
+    try:
+        db.session.commit()
+        flash(f'Precio de "{concepto.nombre}" actualizado.', 'success')
+    except IntegrityError:
+        db.session.rollback()
+        flash(
+            'Ya existe un concepto marcado como mensualidad activo. '
+            'Desactívalo antes de marcar otro.',
+            'danger'
+        )
 
-    flash(f'Precio de "{concepto.nombre}" actualizado.', 'success')
     return redirect(url_for('configuracion.conceptos_cobro'))
 
 
@@ -222,10 +241,18 @@ def editar_precio_concepto(concepto_id):
 def toggle_concepto_cobro(concepto_id):
     concepto = db.get_or_404(ConceptoCobro, concepto_id)
     concepto.activo = not concepto.activo
-    db.session.commit()
+    try:
+        db.session.commit()
+        estado = 'activado' if concepto.activo else 'desactivado'
+        flash(f'El concepto "{concepto.nombre}" fue {estado}.', 'success')
+    except IntegrityError:
+        db.session.rollback()
+        flash(
+            f'No se pudo activar "{concepto.nombre}": ya existe otro concepto '
+            'marcado como mensualidad activo. Desactívalo primero.',
+            'danger'
+        )
 
-    estado = 'activado' if concepto.activo else 'desactivado'
-    flash(f'El concepto "{concepto.nombre}" fue {estado}.', 'success')
     return redirect(url_for('configuracion.conceptos_cobro'))
 
 

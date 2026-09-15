@@ -61,6 +61,18 @@ class ConceptoCobro(db.Model):
     __tablename__ = 'conceptos_cobro'
     __table_args__ = (
         db.UniqueConstraint('nombre', name='uq_conceptos_cobro_nombre'),
+        # Índice único parcial: a lo más UN concepto puede estar marcado
+        # es_mensualidad=True Y activo=True al mismo tiempo. Sin esto,
+        # _monto_mensualidad_con_beca() y nuevo_cargo() usan .first() sobre
+        # ese filtro -- con dos activos, cuál "gana" seria arbitrario según
+        # el orden físico de la tabla (migración
+        # b0e4f9d2a1c7_uniq_concepto_mensualidad_activo).
+        Index(
+            'uq_conceptos_cobro_una_mensualidad_activa', 'es_mensualidad',
+            unique=True,
+            postgresql_where=text('es_mensualidad = true AND activo = true'),
+            sqlite_where=text('es_mensualidad = 1 AND activo = 1'),
+        ),
     )
 
     id = db.Column(db.Integer, primary_key=True)
