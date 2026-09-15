@@ -12,6 +12,15 @@ from servicios.matriculas import crear_alumno_generando_matricula
 
 registro_bp = Blueprint('registro', __name__)
 
+# Letras (con acentos), espacios, guion y apóstrofo -- para apellidos
+# compuestos reales ("Pérez-García", "D'León"). El PRIMER caracter debe
+# ser letra a fuerzas: así un nombre nunca puede empezar con = + - @,
+# que es lo que se interpretaría como fórmula al exportarlo a Excel (ver
+# utilidades/archivos.py::valor_seguro_excel, que además neutraliza esto
+# como segunda capa por si el nombre viene de otro lado, ej. importación
+# masiva).
+NOMBRE_REGEX = re.compile(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ '\-]{4,119}$")
+
 
 @registro_bp.route('/registro', methods=['GET', 'POST'])
 @limiter.limit('20 per hour;5 per minute', methods=['POST'])
@@ -53,8 +62,8 @@ def registro():
 
     errores = []
 
-    if len(nombre_completo) < 5:
-        errores.append('Ingresa tu nombre completo correctamente.')
+    if not NOMBRE_REGEX.match(nombre_completo):
+        errores.append('El nombre solo puede tener letras y espacios (5 a 120 caracteres).')
 
     if not re.match(r'^[A-Z0-9]{18}$', curp):
         errores.append('La CURP debe tener exactamente 18 caracteres alfanuméricos.')

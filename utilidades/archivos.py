@@ -47,3 +47,13 @@ def contenido_coincide_con_extension(archivo) -> bool:
     archivo.seek(0)
 
     return any(inicio.startswith(firma) for firma in firmas)
+
+
+CARACTERES_FORMULA_EXCEL = ('=', '+', '-', '@')
+
+
+def valor_seguro_excel(valor):
+    """Antepone un apóstrofo si el texto podría leerse como fórmula en Excel/Sheets."""
+    if isinstance(valor, str) and valor[:1] in CARACTERES_FORMULA_EXCEL:
+        return "'" + valor
+    return valor

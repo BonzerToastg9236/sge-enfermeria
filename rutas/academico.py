@@ -19,6 +19,7 @@ from modelos import (
 )
 from utilidades.seguridad import rol_requerido
 from utilidades.fechas import periodo_escolar_actual
+from utilidades.archivos import valor_seguro_excel
 from servicios.academico import _max_periodos, _registrar_historial_calificacion, _siguiente_numero_acta
 
 academico_bp = Blueprint('academico', __name__)
@@ -205,7 +206,7 @@ def plantilla_boletas():
 
     for row_idx, alumno in enumerate(alumnos, start=2):
         ws.cell(row=row_idx, column=1, value=alumno.matricula_id)
-        ws.cell(row=row_idx, column=2, value=alumno.nombre_completo)
+        ws.cell(row=row_idx, column=2, value=valor_seguro_excel(alumno.nombre_completo))
 
     ws.freeze_panes = 'C2'
 
