@@ -21,6 +21,9 @@ registro_bp = Blueprint('registro', __name__)
 # masiva).
 NOMBRE_REGEX = re.compile(r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ '\-]{4,119}$")
 
+# correo es opcional; cuando SÍ se captura, se valida el formato antes de guardarlo.
+CORREO_REGEX = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+
 
 @registro_bp.route('/registro', methods=['GET', 'POST'])
 @limiter.limit('20 per hour;5 per minute', methods=['POST'])
@@ -63,10 +66,13 @@ def registro():
     errores = []
 
     if not NOMBRE_REGEX.match(nombre_completo):
-        errores.append('El nombre solo puede tener letras y espacios (5 a 120 caracteres).')
+        errores.append('Ingresa tu nombre completo correctamente (solo letras, espacios, guion y apóstrofo).')
 
     if not re.match(r'^[A-Z0-9]{18}$', curp):
         errores.append('La CURP debe tener exactamente 18 caracteres alfanuméricos.')
+
+    if correo and not CORREO_REGEX.match(correo):
+        errores.append('El correo electrónico no tiene un formato válido.')
     elif Alumno.query.filter_by(curp=curp).first():
         errores.append(f'Ya existe un alumno registrado con la CURP "{curp}".')
 
