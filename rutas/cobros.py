@@ -275,6 +275,13 @@ def registrar_pago(cargo_id):
     if cargo is None:
         abort(404)
 
+    # Recalcula el recargo ANTES de fijar el saldo contra el que se valida
+    # el pago -- mismo paso que ya hacen cobros(), cartera_vencida() y el
+    # dashboard antes de mostrar pantalla. Sin esto, un cargo vencido que
+    # nadie volvió a abrir se puede pagar por el monto original y el
+    # recargo se pierde para siempre (el cargo queda PAGADO).
+    cargo.actualizar_recargo_si_vencido()
+
     if cargo.estatus == EstatusCargo.CANCELADO:
         flash('Este cargo está cancelado; no se le pueden registrar pagos.', 'danger')
         return redirect(url_for('cobros.cobros', matricula=cargo.matricula_fk))
