@@ -201,6 +201,10 @@ class Alumno(db.Model):
     fecha_registro = db.Column(db.DateTime, default=ahora_utc)
     fecha_validacion = db.Column(db.DateTime, nullable=True)  # Se llena cuando admin aprueba el pre-registro
 
+    __table_args__ = (
+        CheckConstraint('cuatrimestre_actual >= 1', name='ck_alumno_cuatrimestre_positivo'),
+    )
+
     # Relaciones
     calificaciones = db.relationship(
         'Calificacion',

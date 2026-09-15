@@ -351,6 +351,8 @@ def importar_alumnos():
         if cuatrimestre_raw is not None:
             try:
                 cuatrimestre_actual = int(cuatrimestre_raw)
+                if not (1 <= cuatrimestre_actual <= _max_periodos()):
+                    fila_errores.append(f'cuatrimestre_actual debe estar entre 1 y {_max_periodos()}')
             except (TypeError, ValueError):
                 fila_errores.append('cuatrimestre_actual debe ser un número')
 
