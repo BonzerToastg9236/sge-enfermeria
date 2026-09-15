@@ -61,6 +61,13 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'  # Mitiga CSRF vía navegación cruzada
     SESSION_COOKIE_SECURE = False    # En ProductionConfig se fuerza a True (requiere HTTPS)
 
+    # --- Cookie de "recordar sesión" (checkbox del login, Flask-Login) ---
+    # Sin esto, Flask-Login usa sus propios defaults: sin Secure y 365 días.
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = 'Lax'
+    REMEMBER_COOKIE_SECURE = False    # En ProductionConfig se fuerza a True (requiere HTTPS)
+    REMEMBER_COOKIE_DURATION = timedelta(days=14)  # En vez del año por defecto
+
     # --- Rate limiting (Flask-Limiter): protege /login contra fuerza bruta ---
     # "memory://" guarda los contadores en RAM del proceso: funciona bien para
     # desarrollo y para un único worker de Gunicorn. En producción con VARIOS
@@ -109,6 +116,7 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     DEBUG = False
     SESSION_COOKIE_SECURE = True  # El VPS debe servir por HTTPS (Nginx + certificado)
+    REMEMBER_COOKIE_SECURE = True  # Ídem, para la cookie de "recordar sesión"
 
     # Gunicorn corre VARIOS workers (procesos separados) en producción.
     # "memory://" es por-proceso, así que cada worker tendría su propio
