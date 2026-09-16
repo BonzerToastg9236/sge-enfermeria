@@ -211,6 +211,9 @@ sirve de verdad.
 | D5 | Contraseña con `#` rompe el arranque de Gunicorn | `DEPLOYMENT.md` paso 5 (manual) | **P1** |
 | D9 | Logs de Gunicorn llenan el disco | `logrotate_sge` (ya corregido) | **P1** |
 | D10 | Respaldos sin tope de espacio | `backup.sh` (ya corregido) | **P1** |
+| D7 | Sin cabeceras de seguridad en las respuestas HTTP | `nginx_sge.conf` (**Aplicado**, commit `dfc9da9`, 2026-08-13) | P1 |
+| D8 | Gunicorn corre sin ningún aislamiento del sistema | `sge.service` (**Aplicado**, commit `dfc9da9`, 2026-08-13) | P1 |
 
-**Pendientes que este paquete NO cubre** (menor prioridad, ver auditoría):
-D7 (cabeceras de seguridad en Nginx) y D8 (endurecimiento de systemd).
+Verificado en la auditoría de seguridad más reciente (2026-09-15): D7 y D8
+ya estaban bien implementados en ambos archivos -- no quedan pendientes de
+este paquete.
