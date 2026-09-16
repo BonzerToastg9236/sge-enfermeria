@@ -662,15 +662,23 @@ def avanzar_cuatrimestre_lote():
         # alumnos les falta el mismo precio, es un solo problema de
         # configuración, no 40 avisos en pantalla.
         avisos_de_configuracion = []
-        for alumno in alumnos:
-            ok, mensaje, cargos, materias, avisos = _avanzar_cuatrimestre(alumno)
-            if ok:
-                avanzados.append({'alumno': alumno, 'cargos': len(cargos), 'materias': len(materias)})
-            else:
-                omitidos.append({'alumno': alumno, 'motivo': mensaje})
-            for aviso in avisos:
-                if aviso not in avisos_de_configuracion:
-                    avisos_de_configuracion.append(aviso)
+        # no_autoflush: _avanzar_cuatrimestre() consulta la BD (conceptos,
+        # _cargo_duplicado) por cada alumno del lote -- sin esto, esa
+        # consulta dispara un autoflush de los INSERT de alumnos ya
+        # procesados en este mismo lote, y si alguno choca con el índice
+        # único, el IntegrityError se dispara AQUÍ (fuera del try/except
+        # de abajo) en vez de en el commit explícito, y el lote entero
+        # truena con un 500 en lugar del mensaje de abajo.
+        with db.session.no_autoflush:
+            for alumno in alumnos:
+                ok, mensaje, cargos, materias, avisos = _avanzar_cuatrimestre(alumno)
+                if ok:
+                    avanzados.append({'alumno': alumno, 'cargos': len(cargos), 'materias': len(materias)})
+                else:
+                    omitidos.append({'alumno': alumno, 'motivo': mensaje})
+                for aviso in avisos:
+                    if aviso not in avisos_de_configuracion:
+                        avisos_de_configuracion.append(aviso)
 
         try:
             db.session.commit()
