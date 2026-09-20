@@ -52,3 +52,10 @@ document.querySelectorAll('.js-confirm-beca-anual').forEach((form) => {
     }
   });
 });
+
+// Confirmación genérica: el mensaje viaja en data-mensaje (texto, nunca código).
+document.querySelectorAll('.js-confirm').forEach((form) => {
+  form.addEventListener('submit', (evento) => {
+    if (!confirm(form.dataset.mensaje)) evento.preventDefault();
+  });
+});

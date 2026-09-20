@@ -13,7 +13,7 @@ from decimal import Decimal
 from sqlalchemy import func
 
 from extensiones import db
-from modelos import Cargo, EstatusCargo, ConceptoCobro
+from modelos import Alumno, Cargo, EstatusCargo, ConceptoCobro
 from utilidades.fechas import hoy_local, periodo_escolar_actual
 
 MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -227,3 +227,42 @@ def _vencimiento_dia_10_sugerido() -> str:
             mes = 1
             anio += 1
     return date(anio, mes, 10).isoformat()
+
+
+def aplicar_mensualidad_a_pendientes(plan):
+    """
+    Lleva la mensualidad NUEVA de una carrera a los cargos de mensualidad de sus alumnos que siguen
+    PENDIENTES y sin pagos (con la beca vigente de cada alumno). Lo ya cobrado, parcial, pagado o
+    cancelado no se toca. Devuelve cuántos cargos cambiaron. Quien llama hace el commit.
+    """
+    concepto = ConceptoCobro.query.filter_by(es_mensualidad=True, activo=True).first()
+    if concepto is None or plan.monto_mensualidad is None:
+        return 0
+    cargos = (
+        Cargo.query
+        .join(Alumno, Alumno.matricula_id == Cargo.matricula_fk)
+        .filter(Alumno.id_plan_fk == plan.id, Cargo.concepto_cobro_fk == concepto.id, Cargo.estatus == EstatusCargo.PENDIENTE)
+        .all()
+    )
+    cambiados = 0
+    for cargo in cargos:
+        if cargo.total_pagado() != 0:
+            continue
+        nuevo = _monto_mensualidad_con_beca(cargo.alumno, cargo.periodo_escolar or '')
+        if nuevo is not None and nuevo != cargo.monto:
+            cargo.monto = nuevo
+            cargo.actualizar_estatus()
+            cambiados += 1
+    return cambiados
+
+
+def aplicar_precio_a_pendientes(concepto, monto):
+    """Igual, para un concepto que NO es mensualidad: cargos PENDIENTES sin pagos pasan al precio nuevo."""
+    cargos = Cargo.query.filter(Cargo.concepto_cobro_fk == concepto.id, Cargo.estatus == EstatusCargo.PENDIENTE).all()
+    cambiados = 0
+    for cargo in cargos:
+        if cargo.total_pagado() == 0 and cargo.monto != monto:
+            cargo.monto = monto
+            cargo.actualizar_estatus()
+            cambiados += 1
+    return cambiados

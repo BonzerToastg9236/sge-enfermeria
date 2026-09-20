@@ -101,11 +101,35 @@
                                             </thead>
                                             <tbody>
                                                 {% for materia in materias_por_cuatrimestre[cuatri] %}
-                                                    <tr>
-                                                        <td>{{ materia.nombre }}</td>
+                                                    <tr class="{{ 'text-muted' if not materia.activa }}">
+                                                        <td>
+                                                            {{ materia.nombre }}
+                                                            {% if not materia.activa %}<span class="badge bg-secondary ms-1">Archivada</span>{% endif %}
+                                                            <details class="mt-1">
+                                                                <summary class="small text-primary" style="cursor:pointer"><i class="bi bi-pencil me-1"></i>Editar</summary>
+                                                                <form action="{{ url_for('configuracion.editar_materia', materia_id=materia.id) }}" method="POST" class="row g-2 mt-1">
+                                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                                    <div class="col-12"><input type="text" class="form-control form-control-sm" name="nombre" value="{{ materia.nombre }}" maxlength="150" required></div>
+                                                                    <div class="col-4"><input type="text" class="form-control form-control-sm" name="clave" value="{{ materia.clave or '' }}" maxlength="20" placeholder="Clave"></div>
+                                                                    <div class="col-4"><select class="form-select form-select-sm" name="cuatrimestre">
+                                                                        {% for c in range(1, max_cuatrimestres + 1) %}<option value="{{ c }}" {{ 'selected' if c == materia.cuatrimestre }}>{{ c }}°</option>{% endfor %}
+                                                                    </select></div>
+                                                                    <div class="col-4"><input type="number" step="0.5" min="0" max="999" class="form-control form-control-sm" name="creditos" value="{{ materia.creditos if materia.creditos is not none else '' }}" placeholder="Créditos"></div>
+                                                                    <div class="col-12"><button type="submit" class="btn btn-sm btn-primary">Guardar cambios</button>
+                                                                        <span class="small text-muted ms-1">Se actualiza en todo el sistema; las calificaciones no se pierden.</span></div>
+                                                                </form>
+                                                            </details>
+                                                        </td>
                                                         <td>{{ materia.clave or '—' }}</td>
                                                         <td>{{ materia.creditos or '—' }}</td>
                                                         <td class="text-end">
+                                                            <form action="{{ url_for('configuracion.toggle_materia', materia_id=materia.id) }}" method="POST" class="d-inline"
+                                                                  title="Archivar: deja de ofrecerse en boletas y cargas nuevas, conserva su historial">
+                                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                                <button type="submit" class="btn btn-sm {{ 'btn-outline-warning' if materia.activa else 'btn-outline-success' }}">
+                                                                    <i class="bi {{ 'bi-archive' if materia.activa else 'bi-arrow-counterclockwise' }}"></i>
+                                                                </button>
+                                                            </form>
                                                             <form action="{{ url_for('configuracion.eliminar_materia', materia_id=materia.id) }}" method="POST" class="d-inline js-confirm-eliminar-materia"
                                                                   data-materia="{{ materia.nombre }}">
                                                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

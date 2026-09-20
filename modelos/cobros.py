@@ -200,6 +200,15 @@ class ConfiguracionInstitucion(db.Model):
 
     max_periodos = db.Column(db.Integer, nullable=False, default=9)  # Reemplaza a CUATRIMESTRES_MAXIMOS fijo en config.py
 
+    # --- Formato de las matrículas NUEVAS (cada institución tiene el suyo) ---
+    # matrícula = <prefijo fijo> + <clave de carrera si aplica> + <año si aplica> + <separador> + <consecutivo>
+    # Por defecto reproduce el formato de siempre: LEN2026-00001. Las ya emitidas no cambian.
+    matricula_prefijo = db.Column(db.String(6), nullable=False, default='', server_default='')
+    matricula_incluye_clave = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    matricula_incluye_anio = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    matricula_separador = db.Column(db.String(2), nullable=False, default='-', server_default='-')
+    matricula_digitos = db.Column(db.Integer, nullable=False, default=5, server_default='5')
+
     @staticmethod
     def obtener():
         """Devuelve la única configuración existente, creándola con los valores de universidad (los actuales) si no existe."""

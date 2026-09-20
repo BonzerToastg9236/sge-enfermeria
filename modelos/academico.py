@@ -102,6 +102,10 @@ class Materia(db.Model):
     clave = db.Column(db.String(20), nullable=True)  # Clave oficial de la materia, opcional
     cuatrimestre = db.Column(db.Integer, nullable=False)
     creditos = db.Column(db.Float, nullable=True)
+    # Archivada = ya no se ofrece en boletas, carga académica ni egreso, pero conserva sus
+    # calificaciones e historial. Es lo que se hace con una materia que ya dejó huella (borrarla
+    # rompería el historial de los alumnos).
+    activa = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
 
     id_plan_fk = db.Column(
         db.Integer,

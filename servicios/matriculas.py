@@ -1,22 +1,71 @@
-"""Generación de matrícula única y alta de un Alumno con reintento ante colisión."""
+"""
+Matrículas: formato configurable por institución, generación con reintento ante colisión y alta de un
+Alumno (con matrícula automática o con la propia de la institución).
+"""
 
+from types import SimpleNamespace
+
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
-from modelos import Alumno, PlanEstudio
+from modelos import Alumno, PlanEstudio, ConfiguracionInstitucion
 from utilidades.fechas import ahora_utc
+
+MATRICULA_MAX_CARACTERES = 20   # Alumno.matricula_id (y todas las llaves foráneas que la citan) es String(20)
+
+
+def formato_vigente():
+    """
+    Formato de matrícula configurado. Solo LEE: ConfiguracionInstitucion.obtener() haría un commit al
+    crear la fila la primera vez, y este código corre dentro de la transacción de un alta. Si la
+    configuración aún no existe se usan los valores por defecto (LEN2026-00001).
+    """
+    config = ConfiguracionInstitucion.query.first()
+    if config is not None:
+        return config
+    return SimpleNamespace(matricula_prefijo='', matricula_incluye_clave=True, matricula_incluye_anio=True,
+                           matricula_separador='-', matricula_digitos=5)
+
+
+def armar_prefijo(config, clave_carrera, anio):
+    """
+    Parte fija de la matrícula ANTES del consecutivo:
+    <prefijo fijo> + <clave de carrera si aplica> + <año si aplica> + <separador>.
+    Con la configuración por defecto: "LEN2026-".
+    """
+    prefijo = config.matricula_prefijo or ''
+    if config.matricula_incluye_clave:
+        prefijo += clave_carrera
+    if config.matricula_incluye_anio:
+        prefijo += str(anio)
+    return prefijo + (config.matricula_separador or '')
+
+
+def ejemplo_matricula(config, clave_carrera='LEN', anio=2026, consecutivo=1):
+    return f"{armar_prefijo(config, clave_carrera, anio)}{consecutivo:0{config.matricula_digitos}d}"
+
+
+def formato_matricula_cabe(config, clave_carrera, **cambios):
+    """¿La matrícula más larga posible con este formato y esta clave cabe en 20 caracteres? `cambios` prueba un formato propuesto."""
+    class _Prueba:
+        pass
+    prueba = _Prueba()
+    for campo in ('matricula_prefijo', 'matricula_incluye_clave', 'matricula_incluye_anio', 'matricula_separador', 'matricula_digitos'):
+        setattr(prueba, campo, cambios.get(campo, getattr(config, campo)))
+    return len(ejemplo_matricula(prueba, clave_carrera)) <= MATRICULA_MAX_CARACTERES
 
 
 def generar_matricula(plan: 'PlanEstudio') -> str:
     """
-    Genera la matrícula siguiente para un plan dado, con el formato:
-        <CLAVE_CARRERA><AÑO_ACTUAL>-<CONSECUTIVO 5 dígitos>
-    Ej: LEN2026-00001, LEN2026-00002, ...
-    El consecutivo se calcula buscando la última matrícula ya usada
-    con ese mismo prefijo (carrera + año), NO el total de alumnos,
-    para que nunca se reutilice un número aunque se den de baja alumnos.
+    Genera la matrícula siguiente para un plan dado, según el formato configurado en
+    ConfiguracionInstitucion (por defecto <CLAVE><AÑO>-<CONSECUTIVO 5 dígitos>, ej. LEN2026-00001).
+    El consecutivo se calcula buscando el MAYOR ya usado con ese mismo prefijo, NO el total de
+    alumnos, para que nunca se reutilice un número aunque se den de baja alumnos. Las matrículas
+    que la institución trajo con su propio formato (importación) y no terminan en solo dígitos
+    después del prefijo simplemente se ignoran.
 
-    NOTA sobre concurrencia: with_for_update() bloquea la fila leída para
+    NOTA sobre concurrencia: with_for_update() bloquea las filas leídas para
     que otra transacción no pueda leer el mismo "último folio" hasta que
     esta termine — esto reduce la condición de carrera en PostgreSQL
     (producción). En SQLite (desarrollo) no hay bloqueo por fila, así que
@@ -26,13 +75,14 @@ def generar_matricula(plan: 'PlanEstudio') -> str:
     todos modos ocurre un choque (ej. dos registros "primeros" del mismo
     prefijo, exactamente al mismo tiempo, donde no hay fila que bloquear).
     """
-    anio_actual = ahora_utc().year
-    prefijo = f"{plan.clave_carrera}{anio_actual}-"
+    config = formato_vigente()
+    prefijo = armar_prefijo(config, plan.clave_carrera, ahora_utc().year)
 
     consulta = (
         Alumno.query
-        .filter(Alumno.matricula_id.like(f"{prefijo}%"))
-        .order_by(Alumno.matricula_id.desc())
+        .filter(Alumno.matricula_id.startswith(prefijo, autoescape=True))
+        .order_by(func.length(Alumno.matricula_id).desc(), Alumno.matricula_id.desc())
+        .limit(200)
     )
 
     # with_for_update() (bloqueo de fila) solo tiene efecto real en motores
@@ -43,15 +93,13 @@ def generar_matricula(plan: 'PlanEstudio') -> str:
     if db.engine.dialect.name != 'sqlite':
         consulta = consulta.with_for_update()
 
-    ultimo = consulta.first()
+    mayor = 0
+    for existente in consulta:
+        resto = existente.matricula_id[len(prefijo):]
+        if resto.isascii() and resto.isdigit():
+            mayor = max(mayor, int(resto))
 
-    if ultimo:
-        ultimo_num = int(ultimo.matricula_id.split('-')[-1])
-        siguiente = ultimo_num + 1
-    else:
-        siguiente = 1
-
-    return f"{prefijo}{siguiente:05d}"
+    return f"{prefijo}{mayor + 1:0{config.matricula_digitos}d}"
 
 
 def crear_alumno_generando_matricula(plan: 'PlanEstudio', intentos_maximos: int = 3, **datos_alumno):
@@ -81,3 +129,18 @@ def crear_alumno_generando_matricula(plan: 'PlanEstudio', intentos_maximos: int 
             continue  # Probable colisión de matrícula: se reintenta con el siguiente consecutivo
 
     return None, 'no se pudo generar una matrícula única tras varios intentos; intenta de nuevo'
+
+
+def crear_alumno_con_matricula(plan: 'PlanEstudio', matricula: str, **datos_alumno):
+    """
+    Alta con la matrícula que la institución YA tiene asignada (importación). Devuelve (alumno, None)
+    o (None, mensaje). Hace su propio commit, igual que crear_alumno_generando_matricula().
+    """
+    nuevo_alumno = Alumno(matricula_id=matricula, id_plan_fk=plan.id, **datos_alumno)
+    try:
+        db.session.add(nuevo_alumno)
+        db.session.commit()
+        return nuevo_alumno, None
+    except IntegrityError:
+        db.session.rollback()
+        return None, f'la matrícula "{matricula}" o la CURP ya existen'

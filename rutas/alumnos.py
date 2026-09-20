@@ -35,7 +35,7 @@ from servicios.alumnos import calcular_estadisticas_alumnos, _matriculas_con_ade
 from servicios.auditoria import registrar
 from servicios.academico import _avanzar_cuatrimestre, _max_periodos, _generar_carga_academica
 from rutas.registro import CORREO_REGEX
-from servicios.matriculas import crear_alumno_generando_matricula
+from servicios.matriculas import crear_alumno_generando_matricula, crear_alumno_con_matricula
 from servicios.cobros import _generar_cargos_de_inscripcion, _generar_cargos_de_reinscripcion
 
 alumnos_bp = Blueprint('alumnos', __name__)
@@ -149,6 +149,7 @@ def buscar():
 
 # (columna, es_obligatoria, descripción para la hoja de ayuda de la plantilla)
 COLUMNAS_IMPORTACION_ALUMNOS = [
+    ('matricula', False, 'Matrícula que la institución YA le asignó (letras, números, . _ -, máx. 20). Vacío = se genera automática'),
     ('nombre_completo', True, 'Nombre completo del alumno'),
     ('curp', True, 'CURP, 18 caracteres'),
     ('fecha_nacimiento', True, 'Formato AAAA-MM-DD, ej. 2005-03-21'),
@@ -184,6 +185,17 @@ LONGITUDES_IMPORTACION = {
     for nombre, _, _ in COLUMNAS_IMPORTACION_ALUMNOS
     if nombre in Alumno.__table__.c and getattr(Alumno.__table__.c[nombre].type, 'length', None)
 }
+
+
+# Matrícula propia de la institución: sin espacios ni '/', que rompería la URL del expediente.
+MATRICULA_PROPIA_REGEX = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,19}')
+
+
+def _alta_alumno(plan, matricula_propia, **datos):
+    """Alta con la matrícula que ya trae el archivo, o con una generada según el formato configurado."""
+    if matricula_propia:
+        return crear_alumno_con_matricula(plan, matricula_propia, **datos)
+    return crear_alumno_generando_matricula(plan, **datos)
 
 
 def _texto_de_celda(valor):
@@ -346,6 +358,14 @@ def importar_alumnos():
         if correo and not CORREO_REGEX.match(str(correo)):
             fila_errores.append('correo con formato inválido')
 
+        matricula_propia = valor_de(fila, 'matricula')
+        if matricula_propia is not None:
+            matricula_propia = _texto_de_celda(matricula_propia)
+            if not MATRICULA_PROPIA_REGEX.fullmatch(matricula_propia):
+                fila_errores.append('matricula inválida (letras, números, . _ - ; máximo 20 caracteres, sin espacios)')
+            elif db.session.get(Alumno, matricula_propia) is not None:
+                fila_errores.append(f'ya existe un alumno con la matrícula {matricula_propia}')
+
         if not re.match(r'^[A-Z0-9]{18}$', curp):
             fila_errores.append('CURP inválida (deben ser 18 caracteres)')
         elif Alumno.query.filter_by(curp=curp).first():
@@ -418,8 +438,8 @@ def importar_alumnos():
             continue
 
         try:
-            alumno, error_creacion = crear_alumno_generando_matricula(
-                plan,
+            alumno, error_creacion = _alta_alumno(
+                plan, matricula_propia,
                 nombre_completo=nombre_completo,
                 curp=curp,
                 fecha_nacimiento=fecha_nacimiento,
@@ -522,7 +542,7 @@ def ver_expediente(matricula):
     alumno = db.get_or_404(Alumno, matricula)
 
     # Todas las materias del plan del alumno (el "Escudo": solo las de SU plan)
-    materias_plan = (
+    todas_las_materias = (
         Materia.query
         .filter_by(id_plan_fk=alumno.id_plan_fk)
         .order_by(Materia.cuatrimestre.asc(), Materia.nombre.asc())
@@ -534,6 +554,9 @@ def ver_expediente(matricula):
     calif_por_materia = {}
     for c in sorted(alumno.calificaciones, key=lambda c: c.fecha_captura):
         calif_por_materia[c.id_materia_fk] = c
+
+    # Una materia ARCHIVADA solo se muestra si este alumno ya tiene calificación en ella.
+    materias_plan = [m for m in todas_las_materias if m.activa or m.id in calif_por_materia]
 
     # Agrupar por cuatrimestre para el acordeón
     cuatrimestres = {}
@@ -609,7 +632,7 @@ def cambiar_estatus(matricula):
         return redirect(url_for('alumnos.ver_expediente', matricula=matricula))
 
     if nuevo_estatus == EstatusAlumno.EGRESADO:
-        materias_plan = Materia.query.filter_by(id_plan_fk=alumno.id_plan_fk).all()
+        materias_plan = Materia.query.filter_by(id_plan_fk=alumno.id_plan_fk, activa=True).all()   # las archivadas ya no cuentan
         calif_por_materia = {c.id_materia_fk: c for c in alumno.calificaciones}
         faltantes = [
             m for m in materias_plan

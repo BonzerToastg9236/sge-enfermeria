@@ -36,7 +36,7 @@ def _generar_carga_academica(alumno):
     periodo_actual = periodo_escolar_actual()
     materias_del_cuatrimestre = (
         Materia.query
-        .filter_by(id_plan_fk=alumno.id_plan_fk, cuatrimestre=alumno.cuatrimestre_actual)
+        .filter_by(id_plan_fk=alumno.id_plan_fk, cuatrimestre=alumno.cuatrimestre_actual, activa=True)
         .order_by(Materia.nombre.asc())
         .all()
     )

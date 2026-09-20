@@ -45,7 +45,7 @@ def boleta(matricula):
     # Nunca se ofrece (ni se acepta) una materia fuera de esta consulta.
     materias = (
         Materia.query
-        .filter_by(id_plan_fk=alumno.id_plan_fk, cuatrimestre=cuatrimestre_seleccionado)
+        .filter_by(id_plan_fk=alumno.id_plan_fk, cuatrimestre=cuatrimestre_seleccionado, activa=True)
         .order_by(Materia.nombre.asc())
         .all()
     )
@@ -171,7 +171,7 @@ def plantilla_boletas():
 
     materias = (
         Materia.query
-        .filter_by(id_plan_fk=plan.id, cuatrimestre=cuatrimestre)
+        .filter_by(id_plan_fk=plan.id, cuatrimestre=cuatrimestre, activa=True)
         .order_by(Materia.nombre.asc())
         .all()
     )
@@ -267,7 +267,7 @@ def importar_boletas():
     # nombre libre sin cruzarlas contra esta consulta.
     materias = (
         Materia.query
-        .filter_by(id_plan_fk=plan.id, cuatrimestre=cuatrimestre)
+        .filter_by(id_plan_fk=plan.id, cuatrimestre=cuatrimestre, activa=True)
         .order_by(Materia.nombre.asc())
         .all()
     )

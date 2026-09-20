@@ -189,7 +189,7 @@ def sembrar(produccion=False):
         if produccion:
             print(
                 '\nSiguientes pasos (todo desde la pantalla, como Directivo):\n'
-                '  1. /planes/mensualidades  -> precio de la mensualidad de la carrera\n'
+                '  1. /planes/mensualidades  -> carreras (agregar/editar/desactivar) y precio de su mensualidad\n'
                 '  2. /conceptos-cobro       -> precio de Inscripción y Reinscripción\n'
                 '  3. /configuracion/cobros  -> política de recargos\n'
                 '  4. /planes/<id>/materias  -> materias del plan de estudios oficial\n'
