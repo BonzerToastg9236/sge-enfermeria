@@ -13,10 +13,11 @@ mecanismo. Esta función se mueve sin editar una sola línea de su cuerpo.
 
 import re
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from flask import Blueprint, render_template, request, flash, redirect, url_for, abort
 from flask_login import current_user
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
@@ -25,8 +26,13 @@ from modelos import (
     EstatusAlumno, TipoDescuentoBeca,
 )
 from utilidades.seguridad import rol_requerido
-from utilidades.fechas import hoy_local, ahora_utc, periodo_escolar_actual
-from servicios.cobros import _cargo_duplicado, _vencimiento_dia_10_sugerido, _monto_mensualidad_con_beca
+from utilidades.fechas import hoy_local, ahora_utc, periodo_escolar_actual, fecha_vencimiento_razonable
+from utilidades.dinero import parsear_monto, MontoInvalido, PORCENTAJE_MAXIMO
+from servicios.cobros import (
+    _cargo_duplicado, _vencimiento_dia_10_sugerido, _monto_mensualidad_con_beca,
+    normalizar_periodo_mensualidad, periodo_mensualidad_sugerido, monto_para_lote,
+)
+from servicios.auditoria import registrar
 from servicios.correo import enviar_comprobante_pago, enviar_recordatorio_vencimiento, DIAS_AVISO_VENCIMIENTO
 
 cobros_bp = Blueprint('cobros', __name__)
@@ -106,13 +112,11 @@ def becas_alumno(matricula):
 
         valor = None
         try:
-            valor = Decimal(valor_raw)
-            if valor <= 0:
-                raise InvalidOperation
-            if tipo_descuento_raw == 'PORCENTAJE' and valor > 100:
-                errores.append('El porcentaje no puede ser mayor a 100.')
-        except InvalidOperation:
-            errores.append('Indica un valor de descuento válido.')
+            # Porcentaje: 0.01 a 100 con 2 decimales. Monto fijo: un importe normal.
+            tope = PORCENTAJE_MAXIMO if tipo_descuento_raw == 'PORCENTAJE' else None
+            valor = parsear_monto(valor_raw, **({'maximo': tope} if tope else {}))
+        except MontoInvalido as e:
+            errores.append(f'Valor de descuento inválido: {e}')
 
         if errores:
             for error in errores:
@@ -148,8 +152,15 @@ def becas_alumno(matricula):
                     nuevo_monto = _monto_mensualidad_con_beca(alumno, cargo.periodo_escolar)
                     if nuevo_monto is not None:
                         cargo.monto = nuevo_monto
+                        cargo.actualizar_estatus()  # beca total => saldo $0 => Pagado
                         cargos_ajustados += 1
 
+        registrar(
+            'BECA_OTORGADA', 'Beca', beca.id,
+            f'{nombre}: {tipo_descuento_raw} {valor} para el periodo {periodo_escolar}; '
+            f'cargos ya generados que se ajustaron: {cargos_ajustados}. Motivo: {motivo or "—"}',
+            matricula=alumno.matricula_id,
+        )
         db.session.commit()
 
         flash(f'Beca "{nombre}" otorgada para el periodo {periodo_escolar}.', 'success')
@@ -174,6 +185,7 @@ def desactivar_beca(beca_id):
     """Desactiva una beca -- los cargos que ya se generaron con el descuento NO se revierten automáticamente."""
     beca = db.get_or_404(Beca, beca_id)
     beca.activa = False
+    registrar('BECA_DESACTIVADA', 'Beca', beca.id, f'{beca.nombre} ({beca.periodo_escolar})', matricula=beca.matricula_fk)
     db.session.commit()
     flash(f'Beca "{beca.nombre}" desactivada. Los cargos ya generados con ese descuento no se revierten solos.', 'warning')
     return redirect(url_for('cobros.becas_alumno', matricula=beca.matricula_fk))
@@ -204,16 +216,16 @@ def nuevo_cargo(matricula):
 
     monto = None
     try:
-        monto = Decimal(monto_raw)
-        if monto <= 0:
-            errores.append('El monto debe ser mayor a 0.')
-    except InvalidOperation:
-        errores.append('El monto no es un número válido.')
+        monto = parsear_monto(monto_raw)
+    except MontoInvalido as e:
+        errores.append(f'Monto inválido: {e}')
 
     fecha_vencimiento = None
     if fecha_vencimiento_raw:
         try:
             fecha_vencimiento = datetime.strptime(fecha_vencimiento_raw, '%Y-%m-%d').date()
+            if not fecha_vencimiento_razonable(fecha_vencimiento):
+                errores.append('La fecha de vencimiento debe estar entre los años 2000 y 2100.')
         except ValueError:
             errores.append('La fecha de vencimiento no es válida.')
 
@@ -221,6 +233,17 @@ def nuevo_cargo(matricula):
         for error in errores:
             flash(error, 'danger')
         return redirect(url_for('cobros.cobros', matricula=matricula))
+
+    if concepto_cobro.es_mensualidad:
+        periodo_canonico = normalizar_periodo_mensualidad(periodo_escolar)
+        if periodo_canonico is None:
+            flash(
+                'Para una mensualidad el periodo debe tener el formato AAAA-X-Mes '
+                f'(ej. {periodo_mensualidad_sugerido()}); así no se cobra dos veces el mismo mes.',
+                'danger'
+            )
+            return redirect(url_for('cobros.cobros', matricula=matricula))
+        periodo_escolar = periodo_canonico
 
     duplicado = _cargo_duplicado(alumno.matricula_id, concepto_cobro.id, periodo_escolar)
     if duplicado:
@@ -244,6 +267,12 @@ def nuevo_cargo(matricula):
     )
     db.session.add(nuevo)
     try:
+        db.session.flush()
+        registrar(
+            'CARGO_CREADO', 'Cargo', nuevo.id,
+            f'{concepto_cobro.nombre} ${monto} periodo {periodo_escolar or "—"} vence {fecha_vencimiento or "—"}',
+            matricula=alumno.matricula_id,
+        )
         db.session.commit()
     except IntegrityError:
         # CONCURRENCIA: _cargo_duplicado() de arriba ya no es la única
@@ -303,12 +332,28 @@ def registrar_pago(cargo_id):
     comentario = request.form.get('comentario', '').strip() or None
 
     try:
-        monto_pagado = Decimal(monto_raw)
-        if monto_pagado <= 0:
-            raise InvalidOperation()
-    except InvalidOperation:
-        flash('El monto pagado no es válido.', 'danger')
+        monto_pagado = parsear_monto(monto_raw)
+    except MontoInvalido as e:
+        flash(f'El monto pagado no es válido. {e}', 'danger')
         return redirect(url_for('cobros.cobros', matricula=cargo.matricula_fk))
+
+    # Un mismo comprobante bancario no puede respaldar pagos de ALUMNOS distintos
+    # (sí varios cargos del mismo alumno: una transferencia puede cubrir varias
+    # mensualidades). Los pagos anulados no cuentan.
+    if referencia:
+        en_otro_alumno = (
+            Pago.query.join(Cargo, Cargo.id == Pago.cargo_fk)
+            .filter(func.lower(Pago.referencia) == referencia.lower(), Pago.anulado.is_(False),
+                    Cargo.matricula_fk != cargo.matricula_fk)
+            .first()
+        )
+        if en_otro_alumno:
+            flash(
+                f'La referencia "{referencia}" ya respalda el pago {en_otro_alumno.folio or "#" + str(en_otro_alumno.id)} '
+                'de otro alumno. Verifica el comprobante; si se capturó mal, anula ese pago primero.',
+                'danger'
+            )
+            return redirect(url_for('cobros.cobros', matricula=cargo.matricula_fk))
 
     saldo = cargo.saldo_pendiente()
     if monto_pagado > saldo:
@@ -377,6 +422,11 @@ def anular_pago(pago_id):
     pago.fecha_anulacion = ahora_utc()
     pago.anulado_por_fk = current_user.id
     pago.motivo_anulacion = motivo
+    registrar(
+        'PAGO_ANULADO', 'Pago', pago.id,
+        f'{pago.folio or "#" + str(pago.id)} ${pago.monto_pagado} ({pago.metodo_pago.value}). Motivo: {motivo}',
+        matricula=cargo.matricula_fk,
+    )
 
     # Recalcula el estatus del cargo con este pago ya excluido -- si
     # estaba "Pagado" y este pago era el que lo completaba, regresa solo
@@ -396,7 +446,12 @@ def anular_pago(pago_id):
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def cancelar_cargo(cargo_id):
     cargo = db.get_or_404(Cargo, cargo_id)
-    comentario = request.form.get('comentario', '').strip() or None
+    comentario = request.form.get('comentario', '').strip()
+
+    # Cancelar borra una deuda del estado de cuenta: exige motivo (igual que anular un pago).
+    if len(comentario) < 5:
+        flash('Indica el motivo de la cancelación (mínimo 5 caracteres).', 'danger')
+        return redirect(url_for('cobros.cobros', matricula=cargo.matricula_fk))
 
     if cargo.total_pagado() > 0:
         flash(
@@ -410,6 +465,11 @@ def cancelar_cargo(cargo_id):
 
     cargo.estatus = EstatusCargo.CANCELADO
     cargo.comentario = comentario
+    registrar(
+        'CARGO_CANCELADO', 'Cargo', cargo.id,
+        f'{cargo.concepto} ${cargo.monto} periodo {cargo.periodo_escolar or "—"}. Motivo: {comentario}',
+        matricula=cargo.matricula_fk,
+    )
     db.session.commit()
 
     flash(f'Cargo "{cargo.concepto}" cancelado.', 'success')
@@ -441,13 +501,18 @@ def condonar_recargo(cargo_id):
 
     nuevo_recargo = None
     try:
-        nuevo_recargo = Decimal(nuevo_recargo_raw)
-        if nuevo_recargo < 0:
-            errores.append('El recargo no puede quedar en negativo.')
-        elif nuevo_recargo > cargo.recargo_aplicado:
+        nuevo_recargo = parsear_monto(nuevo_recargo_raw, permitir_cero=True)
+        if nuevo_recargo > cargo.recargo_aplicado:
             errores.append('Esta acción solo puede REDUCIR el recargo, no aumentarlo.')
-    except InvalidOperation:
-        errores.append('El nuevo recargo no es un número válido.')
+        elif cargo.monto + nuevo_recargo - cargo.total_pagado() < 0:
+            # Dejaría dinero cobrado sin cargo (saldo negativo), que además tapa deudas reales del alumno.
+            minimo = max(Decimal('0.00'), cargo.total_pagado() - cargo.monto)
+            errores.append(
+                f'El cargo ya tiene ${cargo.total_pagado()} pagado: condonar hasta ${nuevo_recargo} dejaría un saldo a favor. '
+                f'El recargo mínimo posible es ${minimo}. Para devolver dinero, anula el pago.'
+            )
+    except MontoInvalido as e:
+        errores.append(f'El nuevo recargo no es válido. {e}')
 
     if errores:
         for error in errores:
@@ -459,6 +524,11 @@ def condonar_recargo(cargo_id):
     cargo.recargo_congelado = True
     cargo.comentario = f'Recargo condonado por {current_user.nombre_completo}: ${anterior} -> ${nuevo_recargo}. Motivo: {motivo}'
     cargo.actualizar_estatus()
+    registrar(
+        'RECARGO_CONDONADO', 'Cargo', cargo.id,
+        f'{cargo.concepto}: recargo ${anterior} -> ${nuevo_recargo}. Motivo: {motivo}',
+        matricula=cargo.matricula_fk,
+    )
     db.session.commit()
 
     flash(f'Recargo de "{cargo.concepto}" ajustado de ${anterior} a ${nuevo_recargo}.', 'success')
@@ -532,12 +602,23 @@ def generar_mensualidades():
                 errores.append('El concepto seleccionado no es válido.')
 
         if not periodo_escolar:
-            errores.append('El periodo escolar es obligatorio (ej. "Marzo 2026") para no mezclar mensualidades de distintos meses.')
+            errores.append('El periodo escolar es obligatorio para no mezclar cargos de distintos meses.')
+        elif concepto_cobro is not None and concepto_cobro.es_mensualidad:
+            periodo_canonico = normalizar_periodo_mensualidad(periodo_escolar)
+            if periodo_canonico is None:
+                errores.append(
+                    'Para una mensualidad el periodo debe tener el formato AAAA-X-Mes '
+                    f'(ej. {periodo_mensualidad_sugerido()}); así no se cobra dos veces el mismo mes.'
+                )
+            else:
+                periodo_escolar = periodo_canonico
 
         fecha_vencimiento = None
         if fecha_vencimiento_raw:
             try:
                 fecha_vencimiento = datetime.strptime(fecha_vencimiento_raw, '%Y-%m-%d').date()
+                if not fecha_vencimiento_razonable(fecha_vencimiento):
+                    errores.append('La fecha de vencimiento debe estar entre los años 2000 y 2100.')
             except ValueError:
                 errores.append('La fecha de vencimiento no es válida.')
         else:
@@ -549,15 +630,19 @@ def generar_mensualidades():
         if errores:
             for error in errores:
                 flash(error, 'danger')
-            return render_template('generar_mensualidades.html', conceptos=conceptos_activos, periodo_escolar_sugerido=periodo_escolar_actual(), vencimiento_sugerido=_vencimiento_dia_10_sugerido())
+            return render_template('generar_mensualidades.html', conceptos=conceptos_activos, periodo_escolar_sugerido=periodo_mensualidad_sugerido(), vencimiento_sugerido=_vencimiento_dia_10_sugerido())
 
         alumnos_activos = Alumno.query.filter_by(estatus=EstatusAlumno.ACTIVO).order_by(Alumno.nombre_completo.asc()).all()
 
         generados = []
         omitidos = []
         for alumno in alumnos_activos:
-            if not alumno.plan or alumno.plan.monto_mensualidad is None:
+            if concepto_cobro.es_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
                 omitidos.append({'alumno': alumno, 'motivo': 'Su plan de estudios no tiene mensualidad configurada.'})
+                continue
+            monto = monto_para_lote(alumno, concepto_cobro, periodo_escolar)
+            if monto is None:
+                omitidos.append({'alumno': alumno, 'motivo': f'El concepto "{concepto_cobro.nombre}" no tiene precio configurado en el catálogo.'})
                 continue
             if _cargo_duplicado(alumno.matricula_id, concepto_cobro.id, periodo_escolar):
                 omitidos.append({'alumno': alumno, 'motivo': f'Ya tiene un cargo de "{concepto_cobro.nombre}" para "{periodo_escolar}".'})
@@ -567,14 +652,19 @@ def generar_mensualidades():
                 matricula_fk=alumno.matricula_id,
                 concepto_cobro_fk=concepto_cobro.id,
                 concepto=concepto_cobro.nombre,
-                monto=alumno.plan.monto_mensualidad,
+                monto=monto,
                 periodo_escolar=periodo_escolar,
                 fecha_vencimiento=fecha_vencimiento,
                 generado_por_fk=current_user.id,
             )
+            nuevo.actualizar_estatus()  # beca total => saldo $0 => Pagado
             db.session.add(nuevo)
             generados.append(alumno)
 
+        registrar(
+            'LOTE_CARGOS', 'ConceptoCobro', concepto_cobro.id,
+            f'{concepto_cobro.nombre} periodo {periodo_escolar}: {len(generados)} cargo(s) generados, {len(omitidos)} omitidos',
+        )
         try:
             db.session.commit()
         except IntegrityError:
@@ -595,7 +685,7 @@ def generar_mensualidades():
             return render_template(
                 'generar_mensualidades.html',
                 conceptos=conceptos_activos,
-                periodo_escolar_sugerido=periodo_escolar_actual(),
+                periodo_escolar_sugerido=periodo_mensualidad_sugerido(),
                 vencimiento_sugerido=_vencimiento_dia_10_sugerido(),
             )
 
@@ -609,11 +699,11 @@ def generar_mensualidades():
             conceptos=conceptos_activos,
             generados=generados,
             omitidos=omitidos,
-            periodo_escolar_sugerido=periodo_escolar_actual(),
+            periodo_escolar_sugerido=periodo_mensualidad_sugerido(),
             vencimiento_sugerido=_vencimiento_dia_10_sugerido(),
         )
 
-    return render_template('generar_mensualidades.html', conceptos=conceptos_activos, periodo_escolar_sugerido=periodo_escolar_actual(), vencimiento_sugerido=_vencimiento_dia_10_sugerido())
+    return render_template('generar_mensualidades.html', conceptos=conceptos_activos, periodo_escolar_sugerido=periodo_mensualidad_sugerido(), vencimiento_sugerido=_vencimiento_dia_10_sugerido())
 
 
 @cobros_bp.route('/cobros/recordatorios-vencimiento', methods=['GET', 'POST'])

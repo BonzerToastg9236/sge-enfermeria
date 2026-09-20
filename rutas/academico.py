@@ -19,7 +19,8 @@ from modelos import (
 )
 from utilidades.seguridad import rol_requerido
 from utilidades.fechas import periodo_escolar_actual
-from utilidades.archivos import valor_seguro_excel
+from utilidades.archivos import valor_seguro_excel, error_de_tamano_xlsx, error_de_dimensiones_hoja
+from utilidades.dinero import parsear_calificacion, MontoInvalido
 from servicios.academico import _max_periodos, _registrar_historial_calificacion, _siguiente_numero_acta
 
 academico_bp = Blueprint('academico', __name__)
@@ -76,13 +77,9 @@ def boleta(matricula):
                 continue  # Casilla vacía = aún no se captura, se omite sin error
 
             try:
-                valor = float(valor_raw)
-            except ValueError:
-                flash(f'La calificación de "{materia.nombre}" no es un número válido.', 'danger')
-                continue
-
-            if valor < 0 or valor > 10:
-                flash(f'La calificación de "{materia.nombre}" debe estar entre 0 y 10.', 'danger')
+                valor = parsear_calificacion(valor_raw)
+            except MontoInvalido as e:
+                flash(f'La calificación de "{materia.nombre}" no es válida. {e}', 'danger')
                 continue
 
             # Doble verificación del "Escudo" a nivel de objeto, por si acaso.
@@ -275,11 +272,21 @@ def importar_boletas():
         .all()
     )
 
+    error_archivo = error_de_tamano_xlsx(archivo.stream)
+    if error_archivo:
+        flash(error_archivo, 'danger')
+        return render_template('boletas_importar.html', planes=planes, max_cuatrimestres=_max_periodos(), periodo_escolar_sugerido=periodo_escolar_actual())
+
     try:
         wb = openpyxl.load_workbook(archivo, data_only=True)
         ws = wb['Calificaciones'] if 'Calificaciones' in wb.sheetnames else wb.active
     except Exception:
         flash('No se pudo leer el archivo. Verifica que sea un .xlsx válido generado con la plantilla.', 'danger')
+        return render_template('boletas_importar.html', planes=planes, max_cuatrimestres=_max_periodos(), periodo_escolar_sugerido=periodo_escolar_actual())
+
+    error_hoja = error_de_dimensiones_hoja(ws)
+    if error_hoja:
+        flash(error_hoja, 'danger')
         return render_template('boletas_importar.html', planes=planes, max_cuatrimestres=_max_periodos(), periodo_escolar_sugerido=periodo_escolar_actual())
 
     encabezados = [(c.value.strip() if isinstance(c.value, str) else c.value) for c in ws[1]]
@@ -323,13 +330,9 @@ def importar_boletas():
                 continue
 
             try:
-                valor = float(valor_raw)
-            except (ValueError, TypeError):
-                fila_errores.append(f'"{materia.nombre}": no es un número válido.')
-                continue
-
-            if valor < 0 or valor > 10:
-                fila_errores.append(f'"{materia.nombre}": debe estar entre 0 y 10.')
+                valor = parsear_calificacion(valor_raw)
+            except MontoInvalido:
+                fila_errores.append(f'"{materia.nombre}": no es una calificación válida (número de 0 a 10, ej. 8.5).')
                 continue
 
             # Doble verificación del Escudo a nivel de objeto, por si acaso.

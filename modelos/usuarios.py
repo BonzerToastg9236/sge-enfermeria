@@ -1,6 +1,10 @@
 """Modelos de autenticación: quién puede entrar y con qué rol."""
 
 import enum
+import hashlib
+import hmac
+
+from flask import current_app
 
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -46,6 +50,19 @@ class Usuario(UserMixin, db.Model):
     activo = db.Column(db.Boolean, default=True, nullable=False)
     fecha_creacion = db.Column(db.DateTime, default=ahora_utc)
     ultimo_acceso = db.Column(db.DateTime, nullable=True)
+
+    def huella_sesion(self) -> str:
+        """
+        Huella derivada del hash de la contraseña (con la SECRET_KEY como llave).
+        Va dentro del id de sesión: al cambiar la contraseña la huella cambia y
+        toda cookie de sesión/"recordarme" emitida antes deja de valer. La cookie
+        es solo firmada (no cifrada), por eso no lleva el hash sino un HMAC.
+        """
+        llave = (current_app.config.get('SECRET_KEY') or '').encode()
+        return hmac.new(llave, (self.password_hash or '').encode(), hashlib.sha256).hexdigest()[:20]
+
+    def get_id(self) -> str:
+        return f'{self.id}:{self.huella_sesion()}'
 
     def set_password(self, password_plano: str) -> None:
         # pbkdf2:sha256 (default de Werkzeug): estándar robusto y ampliamente auditado.

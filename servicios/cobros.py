@@ -6,8 +6,11 @@ deploy/PENDIENTES_PRODUCCION.md §3: si falta un precio, estas funciones
 NO generan el cargo y devuelven un aviso, nunca inventan un monto.
 """
 
+import re
 from datetime import datetime, date
 from decimal import Decimal
+
+from sqlalchemy import func
 
 from extensiones import db
 from modelos import Cargo, EstatusCargo, ConceptoCobro
@@ -23,12 +26,57 @@ def _cargo_duplicado(matricula, concepto_cobro_id, periodo_escolar):
     un cargo individual como al generar mensualidades en lote, para no
     cobrarle dos veces el mismo concepto a la misma persona por error.
     """
+    # Sin distinguir mayúsculas: "2026-C-Sep" y "2026-c-sep" son el mismo mes.
+    # (El índice único de la BD compara texto exacto; por eso además los
+    # periodos de mensualidad se guardan en forma canónica, ver abajo.)
+    if periodo_escolar is None:
+        filtro_periodo = Cargo.periodo_escolar.is_(None)
+    else:
+        filtro_periodo = func.lower(Cargo.periodo_escolar) == periodo_escolar.lower()
     return Cargo.query.filter(
         Cargo.matricula_fk == matricula,
         Cargo.concepto_cobro_fk == concepto_cobro_id,
-        Cargo.periodo_escolar == periodo_escolar,
+        filtro_periodo,
         Cargo.estatus != EstatusCargo.CANCELADO,
     ).first()
+
+
+_PERIODO_MENSUALIDAD = re.compile(r'(\d{4})-([A-Za-z])-([A-Za-z]{3})', re.ASCII)
+
+
+def normalizar_periodo_mensualidad(texto):
+    """
+    Devuelve el periodo de una MENSUALIDAD en su forma canónica ("2026-C-Sep")
+    o None si no tiene ese formato. Es el mismo que genera el flujo
+    automático (_generar_cargos_de_periodo); con texto libre ("Septiembre
+    2026", "2026-B") el mismo mes se cobraba dos veces porque la
+    deduplicación no lo reconocía como igual.
+    """
+    m = _PERIODO_MENSUALIDAD.fullmatch((texto or '').strip())
+    if not m:
+        return None
+    anio, letra, mes = m.groups()
+    mes = mes.capitalize()
+    if mes not in MESES_ES[1:]:
+        return None
+    return f'{anio}-{letra.upper()}-{mes}'
+
+
+def periodo_mensualidad_sugerido() -> str:
+    """Ej. "2026-C-Sep": el periodo escolar vigente + el mes en curso."""
+    return f'{periodo_escolar_actual()}-{MESES_ES[hoy_local().month]}'
+
+
+def monto_para_lote(alumno, concepto, periodo):
+    """
+    Monto a cobrar a UN alumno en la generación en lote, o None si falta la
+    configuración de precio. Una mensualidad usa el precio de su carrera con
+    la beca vigente (igual que el flujo automático); cualquier otro concepto
+    usa su propio precio del catálogo, nunca el de la mensualidad.
+    """
+    if concepto.es_mensualidad:
+        return _monto_mensualidad_con_beca(alumno, periodo)
+    return concepto.monto_sugerido
 
 
 def _meses_del_cuatrimestre_actual():
@@ -140,6 +188,7 @@ def _generar_cargos_de_periodo(alumno, nombre_concepto_unico):
                 fecha_vencimiento=date(anio, mes, 10),
                 estatus=EstatusCargo.PENDIENTE,
             )
+            cargo.actualizar_estatus()  # saldo $0 (beca total) => Pagado, no un "Pendiente" imposible de cobrar
             db.session.add(cargo)
             cargos_generados.append(cargo)
 

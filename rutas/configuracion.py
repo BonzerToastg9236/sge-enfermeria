@@ -6,7 +6,6 @@ la institución y política de recargos. Ver deploy/PENDIENTES_PRODUCCION.md
 $0 automáticamente -- no alterar esa regla al mover estas rutas.
 """
 
-from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, render_template, request, flash, redirect, url_for
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +16,12 @@ from modelos import (
     Calificacion, InscripcionMateria, TipoRecargo,
 )
 from utilidades.seguridad import rol_requerido
+from utilidades.dinero import (
+    parsear_monto, parsear_entero, MontoInvalido, MONTO_MAXIMO, RECARGO_MAXIMO_POR_DIA,
+    PORCENTAJE_MAXIMO, DIAS_GRACIA_MAXIMOS,
+)
 from servicios.academico import _max_periodos
+from servicios.auditoria import registrar
 
 configuracion_bp = Blueprint('configuracion', __name__)
 
@@ -33,11 +37,12 @@ def planes_mensualidades():
     if request.method == 'POST':
         plan_id = request.form.get('plan_id', '').strip()
         monto_raw = request.form.get('monto_mensualidad', '').strip()
-        plan = db.get_or_404(PlanEstudio, int(plan_id)) if plan_id.isdigit() else None
+        plan = db.get_or_404(PlanEstudio, int(plan_id)) if plan_id.isascii() and plan_id.isdigit() else None
 
         if not plan:
             flash('Plan de estudios no encontrado.', 'danger')
         elif not monto_raw:
+            registrar('PRECIO_MENSUALIDAD', 'PlanEstudio', plan.id, f'{plan.nombre}: {plan.monto_mensualidad} -> sin definir')
             # Campo vacío = "No definido" a propósito (así lo indica el
             # placeholder del formulario). Antes esto siempre fallaba la
             # validación de Decimal('') y nunca se podía volver a dejar sin
@@ -47,14 +52,15 @@ def planes_mensualidades():
             flash(f'Mensualidad de "{plan.nombre}" eliminada (queda sin definir).', 'success')
         else:
             try:
-                monto = Decimal(monto_raw)
-                if monto < 0:
-                    raise InvalidOperation
+                # 0 es válido: la institución decidió que esa carrera es gratuita.
+                monto = parsear_monto(monto_raw, permitir_cero=True)
+            except MontoInvalido as e:
+                flash(f'La mensualidad no es válida. {e}', 'danger')
+            else:
+                registrar('PRECIO_MENSUALIDAD', 'PlanEstudio', plan.id, f'{plan.nombre}: {plan.monto_mensualidad} -> {monto}')
                 plan.monto_mensualidad = monto
                 db.session.commit()
                 flash(f'Mensualidad de "{plan.nombre}" actualizada a ${monto}.', 'success')
-            except InvalidOperation:
-                flash('El monto no es un número válido.', 'danger')
 
         return redirect(url_for('configuracion.planes_mensualidades'))
 
@@ -165,11 +171,9 @@ def conceptos_cobro():
         monto_sugerido = None
         if monto_sugerido_raw:
             try:
-                monto_sugerido = Decimal(monto_sugerido_raw)
-                if monto_sugerido < 0:
-                    raise InvalidOperation
-            except InvalidOperation:
-                flash('El precio sugerido no es un número válido.', 'danger')
+                monto_sugerido = parsear_monto(monto_sugerido_raw, permitir_cero=True)
+            except MontoInvalido as e:
+                flash(f'El precio sugerido no es válido. {e}', 'danger')
                 return redirect(url_for('configuracion.conceptos_cobro'))
 
         if len(nombre) < 3:
@@ -180,6 +184,8 @@ def conceptos_cobro():
             nuevo = ConceptoCobro(nombre=nombre, monto_sugerido=monto_sugerido, es_mensualidad=es_mensualidad, activo=True)
             db.session.add(nuevo)
             try:
+                db.session.flush()
+                registrar('CONCEPTO_CREADO', 'ConceptoCobro', nuevo.id, f'{nombre}: precio {monto_sugerido if monto_sugerido is not None else "sin definir"}, mensualidad={es_mensualidad}')
                 db.session.commit()
                 flash(f'Concepto "{nombre}" agregado al catálogo.', 'success')
             except IntegrityError:
@@ -213,13 +219,16 @@ def editar_precio_concepto(concepto_id):
     monto_sugerido = None
     if monto_sugerido_raw:
         try:
-            monto_sugerido = Decimal(monto_sugerido_raw)
-            if monto_sugerido < 0:
-                raise InvalidOperation
-        except InvalidOperation:
-            flash('El precio sugerido no es un número válido.', 'danger')
+            monto_sugerido = parsear_monto(monto_sugerido_raw, permitir_cero=True)
+        except MontoInvalido as e:
+            flash(f'El precio sugerido no es válido. {e}', 'danger')
             return redirect(url_for('configuracion.conceptos_cobro'))
 
+    registrar(
+        'PRECIO_CONCEPTO', 'ConceptoCobro', concepto.id,
+        f'{concepto.nombre}: {concepto.monto_sugerido if concepto.monto_sugerido is not None else "sin definir"} -> '
+        f'{monto_sugerido if monto_sugerido is not None else "sin definir"}; mensualidad {concepto.es_mensualidad} -> {es_mensualidad}',
+    )
     concepto.monto_sugerido = monto_sugerido
     concepto.es_mensualidad = es_mensualidad
     try:
@@ -241,6 +250,7 @@ def editar_precio_concepto(concepto_id):
 def toggle_concepto_cobro(concepto_id):
     concepto = db.get_or_404(ConceptoCobro, concepto_id)
     concepto.activo = not concepto.activo
+    registrar('CONCEPTO_ACTIVADO' if concepto.activo else 'CONCEPTO_DESACTIVADO', 'ConceptoCobro', concepto.id, concepto.nombre)
     try:
         db.session.commit()
         estado = 'activado' if concepto.activo else 'desactivado'
@@ -330,27 +340,36 @@ def configuracion_cobros():
         if tipo_raw not in TipoRecargo.__members__:
             errores.append('Selecciona un tipo de recargo válido.')
 
+        # Cada tipo de recargo tiene su propio tope: un porcentaje no pasa de
+        # 100 y un monto por día no puede ser de millones (el recargo nunca
+        # baja solo, así que un typo aquí no se revierte).
+        if tipo_raw in ('PORCENTAJE', 'PORCENTAJE_MENSUAL'):
+            tope = PORCENTAJE_MAXIMO
+        elif tipo_raw == 'POR_DIA':
+            tope = RECARGO_MAXIMO_POR_DIA
+        else:
+            tope = MONTO_MAXIMO
         valor = None
         try:
-            valor = Decimal(valor_raw)
-            if valor < 0:
-                errores.append('El valor del recargo no puede ser negativo.')
-        except InvalidOperation:
-            errores.append('El valor del recargo no es un número válido.')
+            valor = parsear_monto(valor_raw, permitir_cero=True, maximo=tope)
+        except MontoInvalido as e:
+            errores.append(f'El valor del recargo no es válido. {e}')
 
+        dias_gracia = 0
         try:
-            dias_gracia = int(dias_gracia_raw)
-            if dias_gracia < 0:
-                errores.append('Los días de gracia no pueden ser negativos.')
-        except ValueError:
-            errores.append('Los días de gracia deben ser un número entero.')
-            dias_gracia = 0
+            dias_gracia = parsear_entero(dias_gracia_raw or '0', minimo=0, maximo=DIAS_GRACIA_MAXIMOS)
+        except MontoInvalido as e:
+            errores.append(f'Los días de gracia no son válidos. {e}')
 
         if errores:
             for error in errores:
                 flash(error, 'danger')
             return redirect(url_for('configuracion.configuracion_cobros'))
 
+        registrar(
+            'CONFIG_RECARGOS', 'ConfiguracionCobros', config.id,
+            f'{config.tipo_recargo.name} {config.valor_recargo} gracia {config.dias_gracia} -> {tipo_raw} {valor} gracia {dias_gracia}',
+        )
         config.tipo_recargo = TipoRecargo[tipo_raw]
         config.valor_recargo = valor
         config.dias_gracia = dias_gracia

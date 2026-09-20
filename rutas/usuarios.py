@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 
 from extensiones import db
 from modelos import Usuario, RolUsuario
-from utilidades.seguridad import rol_requerido
+from servicios.auditoria import registrar
+from utilidades.seguridad import rol_requerido, validar_password
 
 usuarios_bp = Blueprint('usuarios', __name__)
 
@@ -36,8 +37,9 @@ def nuevo_usuario():
             errores.append('El usuario debe tener al menos 4 caracteres (letras, números, "." o "_").')
         elif Usuario.query.filter_by(username=username).first():
             errores.append(f'El usuario "{username}" ya existe.')
-        if len(password) < 8:
-            errores.append('La contraseña debe tener al menos 8 caracteres.')
+        motivo_password = validar_password(password, username)
+        if motivo_password:
+            errores.append(motivo_password)
         elif password != confirmar:
             errores.append('Las contraseñas no coinciden.')
         if rol_raw not in RolUsuario.__members__:
@@ -58,6 +60,8 @@ def nuevo_usuario():
 
         try:
             db.session.add(nuevo)
+            db.session.flush()
+            registrar('USUARIO_CREADO', 'Usuario', nuevo.id, f'{username} ({nuevo.rol.name}) - {nombre_completo}')
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
@@ -81,6 +85,7 @@ def toggle_usuario(user_id):
         return redirect(url_for('usuarios.usuarios'))
 
     usuario.activo = not usuario.activo
+    registrar('USUARIO_ACTIVADO' if usuario.activo else 'USUARIO_DESACTIVADO', 'Usuario', usuario.id, f'{usuario.username} ({usuario.rol.name})')
     db.session.commit()
 
     estado = 'activada' if usuario.activo else 'desactivada'

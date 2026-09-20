@@ -181,6 +181,9 @@ def create_app(config_name='development'):
     from rutas.alumnos import alumnos_bp
     app.register_blueprint(alumnos_bp)
 
+    from rutas.auditoria import auditoria_bp
+    app.register_blueprint(auditoria_bp)
+
     return app
 
 
@@ -307,4 +310,7 @@ if __name__ == '__main__':
     # datos lo administra exclusivamente Flask-Migrate (flask db upgrade).
     # Tener ambos mecanismos activos a la vez causaba estados inconsistentes
     # entre lo que create_all() creaba y lo que las migraciones esperaban.
-    app.run(debug=True)
+    # use_evalex=False: conserva el autorecargado y la página de traceback pero
+    # QUITA la consola interactiva de Werkzeug (/console), que ejecuta Python
+    # arbitrario a quien conozca (o calcule) el PIN.
+    app.run(debug=True, use_evalex=False)

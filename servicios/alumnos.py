@@ -47,9 +47,9 @@ def _matriculas_con_adeudo():
     return {matricula for matricula, _saldo in filas}
 
 
-def calcular_estadisticas_alumnos():
+def calcular_estadisticas_alumnos(incluir_adeudo=True):
     """Números clave para el panel del buscador (pantalla de inicio)."""
-    con_adeudo = len(_matriculas_con_adeudo())
+    con_adeudo = len(_matriculas_con_adeudo()) if incluir_adeudo else None
 
     return {
         'total': Alumno.query.count(),

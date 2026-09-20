@@ -13,6 +13,7 @@ from sqlalchemy import UniqueConstraint, Index, text
 from extensiones import db
 from modelos.academico import Alumno, PlanEstudio
 from utilidades.fechas import ahora_utc, hoy_local
+from utilidades.dinero import MONTO_MAXIMO
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +284,8 @@ class Cargo(db.Model):
         return sum((p.monto_pagado for p in self.pagos if not p.anulado), Decimal('0.00'))
 
     def saldo_pendiente(self):
-        return (self.monto + self.recargo_aplicado) - self.total_pagado()
+        # `or`: un Cargo recién construido (aún sin flush) tiene recargo_aplicado=None.
+        return (self.monto + (self.recargo_aplicado or Decimal('0.00'))) - self.total_pagado()
 
     def actualizar_estatus(self):
         """Recalcula el estatus a partir de los pagos reales. Nunca se sobreescribe a mano."""
@@ -353,6 +355,8 @@ class Cargo(db.Model):
             ).quantize(Decimal('0.01'))
         else:
             recargo_calculado = Decimal('0.00')
+
+        recargo_calculado = min(recargo_calculado, MONTO_MAXIMO)  # nunca más de lo que cabe en Numeric(10,2)
 
         if recargo_calculado > self.recargo_aplicado:
             self.recargo_aplicado = recargo_calculado

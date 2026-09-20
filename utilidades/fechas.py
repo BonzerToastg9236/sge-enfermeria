@@ -141,3 +141,13 @@ def _filtro_fecha_larga(valor):
         return '—'
     d = a_local(valor).date() if isinstance(valor, datetime) else valor
     return f'{d.day} de {MESES_LARGOS_ES[d.month]} de {d.year}'
+
+
+# Una fecha de vencimiento fuera de este rango es un error de captura (0001-01-01
+# convertía un cargo de $100 en un recargo de millones al calcular días de atraso).
+FECHA_VENCIMIENTO_MIN = date(2000, 1, 1)
+FECHA_VENCIMIENTO_MAX = date(2100, 12, 31)
+
+
+def fecha_vencimiento_razonable(fecha) -> bool:
+    return FECHA_VENCIMIENTO_MIN <= fecha <= FECHA_VENCIMIENTO_MAX

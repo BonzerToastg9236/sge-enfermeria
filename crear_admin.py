@@ -13,6 +13,7 @@ puedes crear más usuarios (Administrativos) en /usuarios/nuevo.
 import getpass
 
 from app import app, db, Usuario, RolUsuario
+from utilidades.seguridad import validar_password
 
 with app.app_context():
     db.create_all()
@@ -26,13 +27,13 @@ with app.app_context():
     elif Usuario.query.filter_by(username=username).first():
         print(f'Ya existe un usuario con el nombre de usuario "{username}".')
     else:
-        password = getpass.getpass('Contraseña (mínimo 8 caracteres): ')
+        password = getpass.getpass('Contraseña (mínimo 10 caracteres, no una clave común): ')
         confirmar = getpass.getpass('Confirma la contraseña: ')
 
         if password != confirmar:
             print('Las contraseñas no coinciden. Vuelve a correr el script.')
-        elif len(password) < 8:
-            print('La contraseña debe tener al menos 8 caracteres.')
+        elif validar_password(password, username):
+            print(validar_password(password, username))
         else:
             usuario = Usuario(
                 nombre_completo=nombre_completo,

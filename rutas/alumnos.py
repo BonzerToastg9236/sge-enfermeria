@@ -18,7 +18,7 @@ from openpyxl.utils import get_column_letter
 from flask import Blueprint, render_template, request, flash, redirect, url_for, send_file
 from flask_login import login_required, current_user
 from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from extensiones import db
 from modelos import (
@@ -26,12 +26,17 @@ from modelos import (
     Materia, DocumentoAlumno, TipoDocumento, TurnoAlumno, ModalidadEstudio,
 )
 from utilidades.seguridad import rol_requerido
+from utilidades.archivos import (
+    CARACTERES_FORMULA_EXCEL, error_de_tamano_xlsx, error_de_dimensiones_hoja,
+)
 from utilidades.fechas import ahora_utc
 from utilidades.paginacion import ALUMNOS_POR_PAGINA
 from servicios.alumnos import calcular_estadisticas_alumnos, _matriculas_con_adeudo
+from servicios.auditoria import registrar
 from servicios.academico import _avanzar_cuatrimestre, _max_periodos, _generar_carga_academica
+from rutas.registro import CORREO_REGEX
 from servicios.matriculas import crear_alumno_generando_matricula
-from servicios.cobros import _generar_cargos_de_inscripcion
+from servicios.cobros import _generar_cargos_de_inscripcion, _generar_cargos_de_reinscripcion
 
 alumnos_bp = Blueprint('alumnos', __name__)
 
@@ -44,7 +49,9 @@ def index():
     y el buscador universal. Si viene ?filtro=algo en la URL, muestra
     esa lista filtrada en vez del dashboard vacío.
     """
-    estadisticas = calcular_estadisticas_alumnos()
+    # Quién debe dinero es información de Cobros: un CAPTURADOR no la ve (ni la tarjeta ni el filtro).
+    ve_cobros = current_user.puede_cobros()
+    estadisticas = calcular_estadisticas_alumnos(incluir_adeudo=ve_cobros)
 
     filtros_disponibles = {
         'pendientes': ('Alumnos Pendientes de Validación', Alumno.estatus == EstatusAlumno.PENDIENTE),
@@ -56,6 +63,8 @@ def index():
     }
 
     filtro = request.args.get('filtro')
+    if filtro == 'con_adeudo' and not ve_cobros:
+        filtro = None
     termino = request.args.get('q', '').strip()
     page = request.args.get('page', 1, type=int)
     resultados = None
@@ -168,6 +177,22 @@ COLUMNAS_IMPORTACION_ALUMNOS = [
 ]
 
 
+# Longitud máxima de cada columna de texto, leída del modelo: SQLite no la hace
+# cumplir, PostgreSQL sí (y revienta con 500 a mitad del lote).
+LONGITUDES_IMPORTACION = {
+    nombre: Alumno.__table__.c[nombre].type.length
+    for nombre, _, _ in COLUMNAS_IMPORTACION_ALUMNOS
+    if nombre in Alumno.__table__.c and getattr(Alumno.__table__.c[nombre].type, 'length', None)
+}
+
+
+def _texto_de_celda(valor):
+    """Excel entrega los teléfonos como número (5512345678.0): se guardan como texto sin el ".0"."""
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor)
+
+
 @alumnos_bp.route('/alumnos/importar/plantilla')
 @rol_requerido('DIRECTIVO')
 def plantilla_importacion():
@@ -235,12 +260,24 @@ def importar_alumnos():
         flash('El archivo debe tener formato .xlsx (Excel). Usa la plantilla descargable.', 'danger')
         return redirect(url_for('alumnos.importar_alumnos'))
 
+    error_archivo = error_de_tamano_xlsx(archivo.stream)
+    if error_archivo:
+        flash(error_archivo, 'danger')
+        return redirect(url_for('alumnos.importar_alumnos'))
+
     try:
         wb = openpyxl.load_workbook(archivo, data_only=True)
         ws = wb['Alumnos'] if 'Alumnos' in wb.sheetnames else wb.active
     except Exception:
         flash('No se pudo leer el archivo. Verifica que sea un .xlsx válido generado con la plantilla.', 'danger')
         return redirect(url_for('alumnos.importar_alumnos'))
+
+    error_hoja = error_de_dimensiones_hoja(ws)
+    if error_hoja:
+        flash(error_hoja, 'danger')
+        return redirect(url_for('alumnos.importar_alumnos'))
+
+    generar_cargos = request.form.get('generar_cargos') == 'on'
 
     encabezados = [(c.value.strip() if isinstance(c.value, str) else c.value) for c in ws[1]]
     nombres_columnas_conocidas = [nombre for nombre, _, _ in COLUMNAS_IMPORTACION_ALUMNOS]
@@ -270,7 +307,11 @@ def importar_alumnos():
         valor = fila[idx].value
         if isinstance(valor, str):
             valor = valor.strip()
-        return valor if valor not in ('', None) else None
+        if valor in ('', None):
+            return None
+        if nombre_col in LONGITUDES_IMPORTACION and not isinstance(valor, str):
+            valor = _texto_de_celda(valor)
+        return valor
 
     planes_por_clave = {
         p.clave_carrera: p for p in PlanEstudio.query.filter_by(activo=True).all()
@@ -278,6 +319,7 @@ def importar_alumnos():
 
     exitosos = []
     errores = []
+    avisos_de_configuracion = []
 
     for num_fila, fila in enumerate(ws.iter_rows(min_row=2), start=2):
         if all(c.value in (None, '') for c in fila):
@@ -292,6 +334,17 @@ def importar_alumnos():
 
         if not nombre_completo or len(str(nombre_completo)) < 5:
             fila_errores.append('nombre_completo inválido o vacío')
+        elif str(nombre_completo)[0] in CARACTERES_FORMULA_EXCEL:
+            fila_errores.append('nombre_completo empieza con =, +, - o @: Excel lo leería como fórmula al exportar')
+
+        for columna, maximo in LONGITUDES_IMPORTACION.items():
+            texto = valor_de(fila, columna)
+            if texto is not None and len(str(texto)) > maximo:
+                fila_errores.append(f'{columna} excede {maximo} caracteres')
+
+        correo = valor_de(fila, 'correo')
+        if correo and not CORREO_REGEX.match(str(correo)):
+            fila_errores.append('correo con formato inválido')
 
         if not re.match(r'^[A-Z0-9]{18}$', curp):
             fila_errores.append('CURP inválida (deben ser 18 caracteres)')
@@ -364,33 +417,40 @@ def importar_alumnos():
             })
             continue
 
-        alumno, error_creacion = crear_alumno_generando_matricula(
-            plan,
-            nombre_completo=nombre_completo,
-            curp=curp,
-            fecha_nacimiento=fecha_nacimiento,
-            fecha_certificado_prepa=fecha_certificado,
-            estatus=EstatusAlumno[estatus_raw],
-            cuatrimestre_actual=cuatrimestre_actual,
-            correo=valor_de(fila, 'correo'),
-            telefono=valor_de(fila, 'telefono'),
-            telefono_movil=valor_de(fila, 'telefono_movil'),
-            sexo=sexo,
-            numero_identificacion=valor_de(fila, 'numero_identificacion'),
-            estado_civil=valor_de(fila, 'estado_civil'),
-            nacionalidad=valor_de(fila, 'nacionalidad') or 'Mexicana',
-            tipo_sangre=valor_de(fila, 'tipo_sangre'),
-            domicilio_calle_numero=valor_de(fila, 'domicilio_calle_numero'),
-            domicilio_ciudad=valor_de(fila, 'domicilio_ciudad'),
-            domicilio_cp=valor_de(fila, 'domicilio_cp'),
-            domicilio_estado=valor_de(fila, 'domicilio_estado'),
-            contacto_emergencia_nombre=valor_de(fila, 'contacto_emergencia_nombre'),
-            contacto_emergencia_telefono=valor_de(fila, 'contacto_emergencia_telefono'),
-            contacto_emergencia_parentesco=valor_de(fila, 'contacto_emergencia_parentesco'),
-            turno=turno,
-            modalidad=modalidad,
-            grupo_actual=valor_de(fila, 'grupo_actual'),
-        )
+        try:
+            alumno, error_creacion = crear_alumno_generando_matricula(
+                plan,
+                nombre_completo=nombre_completo,
+                curp=curp,
+                fecha_nacimiento=fecha_nacimiento,
+                fecha_certificado_prepa=fecha_certificado,
+                estatus=EstatusAlumno[estatus_raw],
+                cuatrimestre_actual=cuatrimestre_actual,
+                correo=valor_de(fila, 'correo'),
+                telefono=valor_de(fila, 'telefono'),
+                telefono_movil=valor_de(fila, 'telefono_movil'),
+                sexo=sexo,
+                numero_identificacion=valor_de(fila, 'numero_identificacion'),
+                estado_civil=valor_de(fila, 'estado_civil'),
+                nacionalidad=valor_de(fila, 'nacionalidad') or 'Mexicana',
+                tipo_sangre=valor_de(fila, 'tipo_sangre'),
+                domicilio_calle_numero=valor_de(fila, 'domicilio_calle_numero'),
+                domicilio_ciudad=valor_de(fila, 'domicilio_ciudad'),
+                domicilio_cp=valor_de(fila, 'domicilio_cp'),
+                domicilio_estado=valor_de(fila, 'domicilio_estado'),
+                contacto_emergencia_nombre=valor_de(fila, 'contacto_emergencia_nombre'),
+                contacto_emergencia_telefono=valor_de(fila, 'contacto_emergencia_telefono'),
+                contacto_emergencia_parentesco=valor_de(fila, 'contacto_emergencia_parentesco'),
+                turno=turno,
+                modalidad=modalidad,
+                grupo_actual=valor_de(fila, 'grupo_actual'),
+            )
+        except SQLAlchemyError:
+            # Un valor que la BD rechaza (DataError, etc.) solo descarta ESTA fila:
+            # antes el 500 abortaba el lote y las filas siguientes se perdían sin aviso.
+            db.session.rollback()
+            errores.append({'fila': num_fila, 'nombre': nombre_completo, 'errores': ['la base de datos rechazó esta fila (revisa el formato de sus valores)']})
+            continue
 
         if error_creacion:
             # commit por fila individual (ver crear_alumno_generando_matricula):
@@ -403,13 +463,55 @@ def importar_alumnos():
             })
             continue
 
-        exitosos.append({'fila': num_fila, 'nombre': nombre_completo, 'matricula': alumno.matricula_id})
+        # Alta completa (igual que la validación manual desde el expediente): un
+        # alumno importado como no-Pendiente ya está validado, y el cambio queda en
+        # el historial con quién lo importó. Sin esto, al reingresar desde una baja se
+        # le cobraba "Inscripción" a alguien ya inscrito.
+        estatus_importado = EstatusAlumno[estatus_raw]
+        cargos_generados = []
+        try:
+            if estatus_importado != EstatusAlumno.PENDIENTE:
+                alumno.fecha_validacion = ahora_utc()
+            db.session.add(HistorialEstatus(
+                matricula_fk=alumno.matricula_id, usuario_fk=current_user.id,
+                estatus_anterior=None, estatus_nuevo=estatus_importado,
+                comentario='Alta por importación masiva',
+            ))
+            if generar_cargos and estatus_importado == EstatusAlumno.ACTIVO:
+                if cuatrimestre_actual == 1:
+                    cargos_generados, avisos = _generar_cargos_de_inscripcion(alumno)
+                else:
+                    cargos_generados, avisos = _generar_cargos_de_reinscripcion(alumno)
+                for aviso in avisos:
+                    if aviso not in avisos_de_configuracion:
+                        avisos_de_configuracion.append(aviso)
+                _generar_carga_academica(alumno)
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            errores.append({'fila': num_fila, 'nombre': nombre_completo, 'errores': [
+                f'el alumno se creó ({alumno.matricula_id}) pero no se pudo completar su alta (historial/cargos); no lo vuelvas a importar, revísalo en su expediente'
+            ]})
+            continue
+
+        exitosos.append({'fila': num_fila, 'nombre': nombre_completo, 'matricula': alumno.matricula_id, 'cargos': len(cargos_generados)})
+
+    if exitosos or errores:
+        registrar(
+            'IMPORTACION_ALUMNOS', 'Alumno', None,
+            f'{len(exitosos)} alumno(s) importados, {len(errores)} fila(s) con error; '
+            f'cargos generados: {sum(e.get("cargos", 0) for e in exitosos)}; '
+            f'generar_cargos={"sí" if generar_cargos else "no"}; archivo "{archivo.filename[:120]}"',
+        )
+        db.session.commit()
 
     if exitosos:
         flash(f'Se importaron {len(exitosos)} alumno(s) correctamente.', 'success')
 
     if errores:
         flash(f'{len(errores)} fila(s) no se pudieron importar (ver detalle abajo).', 'warning')
+    for aviso in avisos_de_configuracion:
+        flash(aviso, 'warning')
 
     return render_template('importar_alumnos.html', exitosos=exitosos, errores=errores)
 
@@ -526,9 +628,9 @@ def cambiar_estatus(matricula):
             return redirect(url_for('alumnos.ver_expediente', matricula=matricula))
 
         if alumno.tiene_adeudo() and not comentario:
-            saldo = alumno.saldo_total_adeudado()
+            detalle_adeudo = f' de ${alumno.saldo_total_adeudado():.2f}' if current_user.puede_cobros() else ''
             flash(
-                f'El alumno tiene un adeudo económico de ${saldo:.2f}. '
+                f'El alumno tiene un adeudo económico{detalle_adeudo}. '
                 'Si de verdad quieres marcarlo como Egresado, agrega un comentario '
                 'explicando el motivo (ver Cobros para el detalle) y vuelve a intentarlo.',
                 'warning'
@@ -553,6 +655,12 @@ def cambiar_estatus(matricula):
         materias_auto_inscritas = _generar_carga_academica(alumno)
 
     db.session.add(registro)
+    if cargos_auto_generados:
+        registrar(
+            'CARGOS_AUTOMATICOS', 'Alumno', alumno.matricula_id,
+            f'{len(cargos_auto_generados)} cargo(s) generados al activar: ' + ', '.join(f'{c.concepto} {c.periodo_escolar}' for c in cargos_auto_generados),
+            matricula=alumno.matricula_id,
+        )
     try:
         db.session.commit()
     except IntegrityError:
@@ -599,6 +707,12 @@ def avanzar_cuatrimestre(matricula):
     ok, mensaje, cargos, materias, avisos_de_configuracion = _avanzar_cuatrimestre(alumno)
 
     if ok:
+        if cargos:
+            registrar(
+                'CARGOS_AUTOMATICOS', 'Alumno', alumno.matricula_id,
+                f'{len(cargos)} cargo(s) generados al avanzar al {alumno.cuatrimestre_actual}° cuatrimestre',
+                matricula=alumno.matricula_id,
+            )
         try:
             db.session.commit()
         except IntegrityError:
@@ -680,6 +794,11 @@ def avanzar_cuatrimestre_lote():
                     if aviso not in avisos_de_configuracion:
                         avisos_de_configuracion.append(aviso)
 
+        registrar(
+            'AVANCE_LOTE', 'PlanEstudio', plan.id,
+            f'{plan.nombre}, del {cuatrimestre_actual}° al {cuatrimestre_actual + 1}°: {len(avanzados)} avanzaron '
+            f'({sum(a["cargos"] for a in avanzados)} cargos generados), {len(omitidos)} omitidos',
+        )
         try:
             db.session.commit()
         except IntegrityError:

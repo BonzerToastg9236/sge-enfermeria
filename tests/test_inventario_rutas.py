@@ -75,6 +75,7 @@ INVENTARIO_ESPERADO = [
     ('/boletas/importar', ('GET',), 'academico.boletas_importar', ('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')),
     ('/boletas/importar', ('POST',), 'academico.importar_boletas', ('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')),
     ('/boletas/importar/plantilla', ('GET',), 'academico.plantilla_boletas', ('DIRECTIVO', 'ADMINISTRATIVO', 'CAPTURADOR')),
+    ('/auditoria', ('GET',), 'auditoria.bitacora', ('DIRECTIVO',)),
     ('/buscar', ('POST',), 'alumnos.buscar', None),
     ('/cobro/<int:cargo_id>/cancelar', ('POST',), 'cobros.cancelar_cargo', ('DIRECTIVO', 'CONTADOR')),
     ('/cobro/<int:cargo_id>/condonar-recargo', ('POST',), 'cobros.condonar_recargo', ('DIRECTIVO',)),

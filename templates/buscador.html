@@ -197,6 +197,7 @@
                         </div>
                     </a>
                 </div>
+                {% if current_user.puede_cobros() %}
                 <div class="col-6 col-md-4 col-lg-2">
                     <a href="{{ url_for('alumnos.index', filtro='con_adeudo') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Alumnos con Adeudo Económico' }}">
@@ -205,6 +206,7 @@
                         </div>
                     </a>
                 </div>
+                {% endif %}
                 <div class="col-6 col-md-4 col-lg-2">
                     <a href="{{ url_for('alumnos.index', filtro='recientes') }}" class="text-decoration-none">
                         <div class="stat-card {{ 'stat-card-activo' if titulo_filtro == 'Últimos 10 Alumnos Registrados' }}">

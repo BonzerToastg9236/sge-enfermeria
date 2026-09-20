@@ -12,6 +12,7 @@ from modelos.academico import (
     TipoDocumento, DocumentoAlumno,
     Calificacion, HistorialEstatus, HistorialCalificacion, InscripcionMateria,
 )
+from modelos.auditoria import BitacoraAuditoria
 from modelos.cobros import (
     EstatusCargo, MetodoPago, TipoRecargo, TipoDescuentoBeca,
     ConceptoCobro, Beca, ConfiguracionCobros, ConfiguracionInstitucion,
@@ -27,4 +28,5 @@ __all__ = [
     'EstatusCargo', 'MetodoPago', 'TipoRecargo', 'TipoDescuentoBeca',
     'ConceptoCobro', 'Beca', 'ConfiguracionCobros', 'ConfiguracionInstitucion',
     'Cargo', 'Pago', 'ContadorFolio',
+    'BitacoraAuditoria',
 ]

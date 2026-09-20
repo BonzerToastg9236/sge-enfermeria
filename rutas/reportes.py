@@ -9,7 +9,8 @@ from openpyxl.styles import Font, PatternFill
 from flask import Blueprint, render_template, request, flash, send_file
 
 from utilidades.seguridad import rol_requerido
-from utilidades.fechas import hoy_local, ahora_utc
+from utilidades.fechas import hoy_local, ahora_utc, a_local
+from utilidades.archivos import valor_seguro_excel
 from utilidades.paginacion import _paginar_lista, CARGOS_POR_PAGINA
 from servicios.reportes import (
     _calcular_reporte_cobros_del_dia, _calcular_cartera_vencida,
@@ -67,20 +68,23 @@ def exportar_reporte_cobros_del_dia():
     ws.append([f'Reporte de Cobros del Día - {fecha_reporte.strftime("%d/%m/%Y")}'])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
-    ws.append(['Folio', 'Hora', 'Alumno', 'Matrícula', 'Concepto', 'Método', 'Monto'])
+    ws.append(['Folio', 'Hora', 'Alumno', 'Matrícula', 'Concepto', 'Método', 'Monto', 'Estatus'])
     for celda in ws[3]:
         celda.font = fuente_encabezado
         celda.fill = relleno_encabezado
 
     for pago in pagos_del_dia:
+        # Los pagos anulados se listan (transparencia) pero marcados: el TOTAL
+        # solo suma los VIGENTE, y sin esta columna las filas no cuadraban.
         ws.append([
-            pago.folio or f'#{pago.id}',
-            pago.fecha_pago.strftime('%H:%M'),
-            pago.cargo.alumno.nombre_completo if pago.cargo and pago.cargo.alumno else '—',
-            pago.cargo.matricula_fk if pago.cargo else '—',
-            pago.cargo.concepto if pago.cargo else '—',
+            valor_seguro_excel(pago.folio or f'#{pago.id}'),
+            a_local(pago.fecha_pago).strftime('%H:%M'),  # hora de la caja, no UTC
+            valor_seguro_excel(pago.cargo.alumno.nombre_completo if pago.cargo and pago.cargo.alumno else '—'),
+            valor_seguro_excel(pago.cargo.matricula_fk if pago.cargo else '—'),
+            valor_seguro_excel(pago.cargo.concepto if pago.cargo else '—'),
             pago.metodo_pago.value,
             float(pago.monto_pagado),
+            'ANULADO' if pago.anulado else 'VIGENTE',
         ])
 
     ws.append([])
@@ -88,7 +92,7 @@ def exportar_reporte_cobros_del_dia():
     ws.cell(row=fila_total, column=6, value='TOTAL:').font = Font(bold=True)
     ws.cell(row=fila_total, column=7, value=float(total_del_dia)).font = Font(bold=True)
 
-    for col in 'ABCDEFG':
+    for col in 'ABCDEFGH':
         ws.column_dimensions[col].width = 20
 
     ws_concepto = wb.create_sheet('Por Concepto')
@@ -97,7 +101,7 @@ def exportar_reporte_cobros_del_dia():
         celda.font = fuente_encabezado
         celda.fill = relleno_encabezado
     for concepto, total in totales_por_concepto.items():
-        ws_concepto.append([concepto, float(total)])
+        ws_concepto.append([valor_seguro_excel(concepto), float(total)])
     ws_concepto.column_dimensions['A'].width = 30
     ws_concepto.column_dimensions['B'].width = 15
 
@@ -107,7 +111,7 @@ def exportar_reporte_cobros_del_dia():
         celda.font = fuente_encabezado
         celda.fill = relleno_encabezado
     for metodo, total in totales_por_metodo.items():
-        ws_metodo.append([metodo, float(total)])
+        ws_metodo.append([valor_seguro_excel(metodo), float(total)])
     ws_metodo.column_dimensions['A'].width = 25
     ws_metodo.column_dimensions['B'].width = 15
 
@@ -162,7 +166,7 @@ def exportar_cartera_vencida():
     fuente_encabezado = Font(bold=True, color='FFFFFF')
     relleno_encabezado = PatternFill(start_color='DC3545', end_color='DC3545', fill_type='solid')
 
-    ws.append([f'Cartera Vencida - Generado {ahora_utc().strftime("%d/%m/%Y %H:%M")}'])
+    ws.append([f'Cartera Vencida - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}'])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
     ws.append(['Alumno', 'Matrícula', 'Concepto', 'Periodo', 'Días de Atraso', 'Saldo Pendiente'])
@@ -173,10 +177,10 @@ def exportar_cartera_vencida():
     for fila in filas:
         cargo = fila['cargo']
         ws.append([
-            cargo.alumno.nombre_completo,
-            cargo.matricula_fk,
-            cargo.concepto,
-            cargo.periodo_escolar or '—',
+            valor_seguro_excel(cargo.alumno.nombre_completo),
+            valor_seguro_excel(cargo.matricula_fk),
+            valor_seguro_excel(cargo.concepto),
+            valor_seguro_excel(cargo.periodo_escolar or '—'),
             fila['dias_atraso'],
             float(fila['saldo']),
         ])
@@ -220,7 +224,7 @@ def exportar_dashboard_cobros():
     fuente_encabezado = Font(bold=True, color='FFFFFF')
     relleno_encabezado = PatternFill(start_color='0D6EFD', end_color='0D6EFD', fill_type='solid')
 
-    ws.append([f'Dashboard de Cobros - Generado {ahora_utc().strftime("%d/%m/%Y %H:%M")}'])
+    ws.append([f'Dashboard de Cobros - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}'])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
     ws.append(['Total cobrado este mes', float(datos['total_cobrado_mes_actual'])])
@@ -246,7 +250,7 @@ def exportar_dashboard_cobros():
         celda.font = fuente_encabezado
         celda.fill = relleno_encabezado
     for item in datos['ingresos_por_concepto']:
-        ws_concepto.append([item['concepto'], float(item['total'])])
+        ws_concepto.append([valor_seguro_excel(item['concepto']), float(item['total'])])
     ws_concepto.column_dimensions['A'].width = 30
     ws_concepto.column_dimensions['B'].width = 20
 
