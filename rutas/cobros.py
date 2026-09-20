@@ -636,30 +636,34 @@ def generar_mensualidades():
 
         generados = []
         omitidos = []
-        for alumno in alumnos_activos:
-            if concepto_cobro.es_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
-                omitidos.append({'alumno': alumno, 'motivo': 'Su plan de estudios no tiene mensualidad configurada.'})
-                continue
-            monto = monto_para_lote(alumno, concepto_cobro, periodo_escolar)
-            if monto is None:
-                omitidos.append({'alumno': alumno, 'motivo': f'El concepto "{concepto_cobro.nombre}" no tiene precio configurado en el catálogo.'})
-                continue
-            if _cargo_duplicado(alumno.matricula_id, concepto_cobro.id, periodo_escolar):
-                omitidos.append({'alumno': alumno, 'motivo': f'Ya tiene un cargo de "{concepto_cobro.nombre}" para "{periodo_escolar}".'})
-                continue
+        # no_autoflush: cada iteración consulta la BD (plan, becas, duplicados); sin esto, esa consulta
+        # vacía los INSERT pendientes y, si otra petición simultánea ya creó el mismo cargo, el
+        # IntegrityError salta AQUÍ (fuera del try de abajo) y el lote daba 500 en vez del aviso.
+        with db.session.no_autoflush:
+            for alumno in alumnos_activos:
+                if concepto_cobro.es_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
+                    omitidos.append({'alumno': alumno, 'motivo': 'Su plan de estudios no tiene mensualidad configurada.'})
+                    continue
+                monto = monto_para_lote(alumno, concepto_cobro, periodo_escolar)
+                if monto is None:
+                    omitidos.append({'alumno': alumno, 'motivo': f'El concepto "{concepto_cobro.nombre}" no tiene precio configurado en el catálogo.'})
+                    continue
+                if _cargo_duplicado(alumno.matricula_id, concepto_cobro.id, periodo_escolar):
+                    omitidos.append({'alumno': alumno, 'motivo': f'Ya tiene un cargo de "{concepto_cobro.nombre}" para "{periodo_escolar}".'})
+                    continue
 
-            nuevo = Cargo(
-                matricula_fk=alumno.matricula_id,
-                concepto_cobro_fk=concepto_cobro.id,
-                concepto=concepto_cobro.nombre,
-                monto=monto,
-                periodo_escolar=periodo_escolar,
-                fecha_vencimiento=fecha_vencimiento,
-                generado_por_fk=current_user.id,
-            )
-            nuevo.actualizar_estatus()  # beca total => saldo $0 => Pagado
-            db.session.add(nuevo)
-            generados.append(alumno)
+                nuevo = Cargo(
+                    matricula_fk=alumno.matricula_id,
+                    concepto_cobro_fk=concepto_cobro.id,
+                    concepto=concepto_cobro.nombre,
+                    monto=monto,
+                    periodo_escolar=periodo_escolar,
+                    fecha_vencimiento=fecha_vencimiento,
+                    generado_por_fk=current_user.id,
+                )
+                nuevo.actualizar_estatus()  # beca total => saldo $0 => Pagado
+                db.session.add(nuevo)
+                generados.append(alumno)
 
         registrar(
             'LOTE_CARGOS', 'ConceptoCobro', concepto_cobro.id,

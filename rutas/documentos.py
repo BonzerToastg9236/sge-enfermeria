@@ -13,6 +13,7 @@ from modelos import Alumno, DocumentoAlumno, TipoDocumento
 from utilidades.seguridad import rol_requerido
 from utilidades.archivos import extension_permitida, contenido_coincide_con_extension
 from utilidades.fechas import ahora_utc
+from utilidades.dinero import parsear_entero, MontoInvalido
 from servicios.academico import _max_periodos
 
 documentos_bp = Blueprint('documentos', __name__)
@@ -43,8 +44,11 @@ def documentos(matricula):
 
         # --- 1b. Seguimiento administrativo y académico ---
         cuatrimestre_raw = request.form.get('cuatrimestre_actual', '').strip()
-        if cuatrimestre_raw.isdigit():
-            alumno.cuatrimestre_actual = int(cuatrimestre_raw)
+        if cuatrimestre_raw:
+            try:
+                alumno.cuatrimestre_actual = parsear_entero(cuatrimestre_raw, minimo=1, maximo=_max_periodos())
+            except MontoInvalido:
+                flash(f'El cuatrimestre debe ser un número entre 1 y {_max_periodos()}; no se cambió.', 'danger')
         alumno.documentacion_pendiente = request.form.get('documentacion_pendiente', '').strip() or None
         alumno.materias_adeudadas = request.form.get('materias_adeudadas', '').strip() or None
         alumno.faltas_administrativas = request.form.get('faltas_administrativas', '').strip() or None

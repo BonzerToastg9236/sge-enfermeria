@@ -59,7 +59,9 @@ def app():
         # que create_all()/drop_all() operen en silencio sobre tu base de
         # datos real.
         uri_actual = str(_db.engine.url)
-        assert 'memory' in uri_actual, (
+        # Solo una BD en memoria, o una BD cuyo nombre contenga "test" indicada a propósito con
+        # TEST_DATABASE_URL: la suite hace drop_all() y jamás debe tocar una base real.
+        assert 'memory' in uri_actual or (os.environ.get('TEST_DATABASE_URL') and 'test' in _db.engine.url.database), (
             f'¡ALTO! Las pruebas están a punto de usar "{uri_actual}" en vez '
             'de una base de datos en memoria. Revisa FLASK_ENV en conftest.py.'
         )

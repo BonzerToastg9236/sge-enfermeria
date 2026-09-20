@@ -6,6 +6,11 @@ Paginación en memoria para listas que ya no se pueden ordenar en SQL
 # PERFORMANCE-NOTE: con ~800 alumnos, el filtro "Activos" del buscador
 # generaba una página de MÁS DE 1 MB de HTML. El cuello de botella no era
 # SQL, era el tamaño de la respuesta -- de ahí la paginación.
+def pagina_valida(valor) -> int:
+    """Acota ?page= a un rango sensato: un entero gigantesco desbordaba el OFFSET de la consulta (500)."""
+    return min(max(valor or 1, 1), 100_000)
+
+
 ALUMNOS_POR_PAGINA = 24   # 24 = 8 filas de 3 tarjetas en pantalla grande
 CARGOS_POR_PAGINA = 50
 

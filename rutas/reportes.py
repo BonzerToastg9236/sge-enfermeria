@@ -11,7 +11,7 @@ from flask import Blueprint, render_template, request, flash, send_file
 from utilidades.seguridad import rol_requerido
 from utilidades.fechas import hoy_local, ahora_utc, a_local
 from utilidades.archivos import valor_seguro_excel
-from utilidades.paginacion import _paginar_lista, CARGOS_POR_PAGINA
+from utilidades.paginacion import _paginar_lista, CARGOS_POR_PAGINA, pagina_valida
 from servicios.reportes import (
     _calcular_reporte_cobros_del_dia, _calcular_cartera_vencida,
     _calcular_dashboard_cobros,
@@ -142,7 +142,7 @@ def cartera_vencida():
     # pendiente, que es un valor calculado, no una columna. total_vencido y
     # total_filas siguen siendo los GLOBALES: las tarjetas de resumen deben
     # mostrar la cartera completa, no solo lo que se ve en esta página.
-    page = request.args.get('page', 1, type=int)
+    page = pagina_valida(request.args.get('page', 1, type=int))
     filas_pagina, paginacion = _paginar_lista(filas, page, CARGOS_POR_PAGINA)
 
     return render_template(

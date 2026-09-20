@@ -9,6 +9,7 @@ from markupsafe import Markup, escape
 from extensiones import db, limiter
 from modelos import Alumno, PlanEstudio, EstatusAlumno, TurnoAlumno, ModalidadEstudio
 from servicios.matriculas import crear_alumno_generando_matricula
+from utilidades.validacion import errores_de_longitud
 
 registro_bp = Blueprint('registro', __name__)
 
@@ -63,7 +64,16 @@ def registro():
     turno_raw = request.form.get('turno', '')
     modalidad_raw = request.form.get('modalidad', '')
 
-    errores = []
+    errores = errores_de_longitud(Alumno, {
+        'nombre_completo': nombre_completo, 'curp': curp, 'correo': correo, 'telefono': telefono,
+        'telefono_movil': telefono_movil, 'sexo': sexo, 'numero_identificacion': numero_identificacion,
+        'estado_civil': estado_civil, 'nacionalidad': nacionalidad, 'tipo_sangre': tipo_sangre,
+        'domicilio_calle_numero': domicilio_calle_numero, 'domicilio_ciudad': domicilio_ciudad,
+        'domicilio_cp': domicilio_cp, 'domicilio_estado': domicilio_estado,
+        'contacto_emergencia_nombre': contacto_emergencia_nombre,
+        'contacto_emergencia_telefono': contacto_emergencia_telefono,
+        'contacto_emergencia_parentesco': contacto_emergencia_parentesco, 'como_se_entero': como_se_entero,
+    })
 
     if not NOMBRE_REGEX.match(nombre_completo):
         errores.append('Ingresa tu nombre completo correctamente (solo letras, espacios, guion y apóstrofo).')

@@ -4,6 +4,7 @@ from flask import Blueprint, render_template, request
 
 from extensiones import db
 from modelos import BitacoraAuditoria
+from utilidades.paginacion import pagina_valida
 from utilidades.seguridad import rol_requerido
 
 auditoria_bp = Blueprint('auditoria', __name__)
@@ -16,7 +17,7 @@ REGISTROS_POR_PAGINA = 50
 def bitacora():
     accion = request.args.get('accion', '').strip()
     termino = request.args.get('q', '').strip()
-    page = request.args.get('page', 1, type=int)
+    page = pagina_valida(request.args.get('page', 1, type=int))
 
     consulta = BitacoraAuditoria.query
     if accion:

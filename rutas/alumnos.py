@@ -30,7 +30,7 @@ from utilidades.archivos import (
     CARACTERES_FORMULA_EXCEL, error_de_tamano_xlsx, error_de_dimensiones_hoja,
 )
 from utilidades.fechas import ahora_utc
-from utilidades.paginacion import ALUMNOS_POR_PAGINA
+from utilidades.paginacion import ALUMNOS_POR_PAGINA, pagina_valida
 from servicios.alumnos import calcular_estadisticas_alumnos, _matriculas_con_adeudo
 from servicios.auditoria import registrar
 from servicios.academico import _avanzar_cuatrimestre, _max_periodos, _generar_carga_academica
@@ -66,7 +66,7 @@ def index():
     if filtro == 'con_adeudo' and not ve_cobros:
         filtro = None
     termino = request.args.get('q', '').strip()
-    page = request.args.get('page', 1, type=int)
+    page = pagina_valida(request.args.get('page', 1, type=int))
     resultados = None
     titulo_filtro = None
     paginacion = None

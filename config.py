@@ -126,6 +126,12 @@ class ProductionConfig(Config):
     # exige aquí. Instálalo en el VPS con: sudo apt install redis-server
     RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI', 'redis://localhost:6379')
 
+    # Si Redis no responde, NO tumbar el login (antes: 500 para todos hasta que Redis
+    # volviera). Se degrada a límites en memoria por proceso -- más débiles, porque cada
+    # worker de Gunicorn cuenta aparte -- y el error queda en el log para atenderlo.
+    RATELIMIT_SWALLOW_ERRORS = True
+    RATELIMIT_IN_MEMORY_FALLBACK_ENABLED = True
+
     # SECURITY-NOTE: la validación de que SECRET_KEY exista de verdad NO se
     # hace aquí con un __init__ -- Flask llama a app.config.from_object()
     # pasando la CLASE (no una instancia), así que un __init__ en esta clase
@@ -150,7 +156,9 @@ class TestingConfig(Config):
     """
     TESTING = True
     SECRET_KEY = 'clave-de-pruebas-no-usar-en-produccion'
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    # Por defecto SQLite en memoria. Para correr la suite contra PostgreSQL (recomendado antes de
+    # desplegar; ver deploy/PENDIENTES_PRODUCCION.md): TEST_DATABASE_URL=postgresql://.../sge_test
+    SQLALCHEMY_DATABASE_URI = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
     WTF_CSRF_ENABLED = False
     MAIL_SUPPRESS_SEND = True  # Nunca manda correos reales al correr pytest
 

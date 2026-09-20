@@ -12,6 +12,7 @@ Revises: a3ffe23d5c99
 Create Date: 2026-09-05
 
 """
+import sqlalchemy as sa
 from alembic import op
 
 
@@ -28,7 +29,21 @@ depends_on = None
 NAMING_CONVENTION = {'uq': 'uq_%(table_name)s_%(column_0_name)s'}
 
 
+# (tabla, columna, nombre final) de las restricciones UNIQUE que se nombran aquí.
+RESTRICCIONES = [
+    ('conceptos_cobro', 'nombre', 'uq_conceptos_cobro_nombre'),
+    ('pagos', 'folio', 'uq_pagos_folio'),
+]
+
+
 def upgrade():
+    if op.get_bind().dialect.name == 'sqlite':
+        _nombrar_en_sqlite()
+    else:
+        _nombrar_en_postgresql()
+
+
+def _nombrar_en_sqlite():
     with op.batch_alter_table('conceptos_cobro', schema=None, naming_convention=NAMING_CONVENTION) as batch_op:
         batch_op.drop_constraint('uq_conceptos_cobro_nombre', type_='unique')
         batch_op.create_unique_constraint('uq_conceptos_cobro_nombre', ['nombre'])
@@ -36,6 +51,23 @@ def upgrade():
     with op.batch_alter_table('pagos', schema=None, naming_convention=NAMING_CONVENTION) as batch_op:
         batch_op.drop_constraint('uq_pagos_folio', type_='unique')
         batch_op.create_unique_constraint('uq_pagos_folio', ['folio'])
+
+
+def _nombrar_en_postgresql():
+    """
+    PostgreSQL SÍ le puso nombre a esas restricciones al crearlas la migración
+    inicial ("conceptos_cobro_nombre_key", "pagos_folio_key"), así que no hay
+    nada que soltar y recrear (el DROP de arriba fallaba con "constraint ...
+    does not exist" y `flask db upgrade` no terminaba en un servidor nuevo):
+    basta RENOMBRARLAS, sin tocar datos ni perder la unicidad ni un instante.
+    """
+    inspector = sa.inspect(op.get_bind())
+    for tabla, columna, nombre_final in RESTRICCIONES:
+        existentes = inspector.get_unique_constraints(tabla)
+        if any(u['name'] == nombre_final for u in existentes):
+            continue  # ya tiene el nombre esperado
+        actual = next(u['name'] for u in existentes if u['column_names'] == [columna])
+        op.execute(f'ALTER TABLE {tabla} RENAME CONSTRAINT "{actual}" TO "{nombre_final}"')
 
 
 def downgrade():

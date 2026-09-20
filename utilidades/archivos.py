@@ -68,7 +68,9 @@ def valor_seguro_excel(valor):
 # por cada hueco hasta la última fila/columna con algo: un .xlsx de 5 KB con
 # una sola celda en la fila 100,000 consumía ~420 MB (en la fila 1,048,576,
 # gigas). Además un .xlsx es un zip: 8 MB pueden descomprimirse a gigas.
-MAX_FILAS_IMPORTACION = 2000        # ~30 s de importación con el timeout de 60 s de Gunicorn
+# Medido en PostgreSQL 16: ~42 ms por alumno importando con cargos (2000 filas = 81 s, y Gunicorn
+# y Nginx cortan a los 60 s dejando el lote a medias). 500 filas ~ 21 s: margen de 3x.
+MAX_FILAS_IMPORTACION = 500
 MAX_COLUMNAS_IMPORTACION = 60
 MAX_BYTES_DESCOMPRIMIDOS = 40 * 1024 * 1024
 

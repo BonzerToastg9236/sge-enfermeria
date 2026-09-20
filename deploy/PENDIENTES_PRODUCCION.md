@@ -13,6 +13,17 @@ vuelva a confundir con un bloqueo del sistema.
 
 ## 1. Validar la concurrencia de pagos contra PostgreSQL
 
+> **HECHO el 2026-09-20** (PostgreSQL 16.2 real): la suite completa pasa contra
+> PostgreSQL (409/409) y 12 rondas de 2 cobros simultáneos de $800 sobre un cargo de
+> $1,000 dieron **0 sobrepagos** y ninguna ronda con 2 pagos aceptados (el bloqueo
+> `FOR UPDATE` funciona). Además apareció y se corrigió un bloqueo de despliegue: la
+> migración `f1a2b3c4d5e6` solo funcionaba en SQLite y `flask db upgrade` fallaba en
+> PostgreSQL. **Cómo repetirlo** en cualquier máquina con PostgreSQL:
+> `createdb sge_test && TEST_DATABASE_URL=postgresql://USUARIO:CLAVE@localhost/sge_test pytest`
+> (la suite exige que el nombre de la base contenga "test" para no tocar una real).
+> Lo que sigue describe el análisis original; repite la prueba en el servidor de
+> producción antes de abrir el sistema si cambian versiones de PostgreSQL.
+
 ### Qué hace hoy el código (verificado, no supuesto)
 
 `registrar_pago()` (`app.py`) ejecuta, dentro de UNA sola transacción:

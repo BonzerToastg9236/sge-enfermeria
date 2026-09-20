@@ -22,7 +22,8 @@ from logging.handlers import RotatingFileHandler
 
 from urllib.parse import urlparse
 
-from flask import Flask, render_template, request, flash, redirect, url_for
+from flask import Flask, render_template, request, flash, redirect, url_for, abort
+from sqlalchemy.exc import DataError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import config_by_name
@@ -212,6 +213,32 @@ def limite_intentos_excedido(error):
 
     flash('Demasiados intentos de inicio de sesión. Por seguridad, espera un minuto e inténtalo de nuevo.', 'danger')
     return redirect(url_for('auth.login'))
+
+
+@app.before_request
+def rechazar_bytes_nulos():
+    """
+    PostgreSQL no admite el carácter NUL (\\x00) en texto y psycopg2 lanza ValueError
+    (500) si llega a una consulta. Nadie lo escribe a propósito: se rechaza en la puerta.
+    """
+    for coleccion in (request.args, request.form):
+        for _clave, valor in coleccion.items(multi=True):
+            if '\x00' in valor:
+                abort(400)
+
+
+@app.errorhandler(DataError)
+def dato_fuera_de_rango(error):
+    """
+    Red de seguridad: si la BD rechaza un valor por largo o rango (PostgreSQL sí lo
+    hace, SQLite no) y ninguna validación lo atrapó antes, se avisa en vez de mostrar
+    un 500. El destino usa solo la RUTA del referer, igual que el manejador del 413.
+    """
+    db.session.rollback()
+    app.logger.warning('DataError de la base de datos: %s', error.orig, exc_info=True)
+    flash('Alguno de los datos excede la longitud o el rango permitido. Revisa el formulario e inténtalo de nuevo.', 'danger')
+    ruta_previa = urlparse(request.referrer or '').path
+    return redirect(ruta_previa if ruta_previa.startswith('/') else url_for('alumnos.index'))
 
 
 @app.errorhandler(413)

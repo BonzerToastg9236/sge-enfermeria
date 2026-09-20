@@ -10,16 +10,21 @@ calificaciones sin tener que dar de alta todo a mano.
 """
 
 """
-Script de "seed" (datos de prueba).
-Ejecutar UNA vez desde la raíz del proyecto:
+Script de "seed". Ejecutar UNA vez desde la raíz del proyecto:
 
-    python seed.py
+    python seed.py                 # DESARROLLO: planes de ejemplo (Enfermería + Ingenierías) con materias
+    python seed.py --produccion    # PRODUCCIÓN: solo Enfermería, SIN materias de ejemplo
 
-Crea varios PlanEstudio de ejemplo (Enfermería + Ingenierías) con algunas
-materias cada uno, para poder probar el registro público, el buscador y,
-más adelante, la captura de calificaciones sin tener que dar de alta todo
-a mano. Es idempotente: si un plan ya existe (misma clave + año), lo omite.
+El modo demo sirve para probar el registro público, el buscador y la captura de
+calificaciones sin dar de alta todo a mano. En PRODUCCIÓN no se usa: los aspirantes
+verían las ingenierías de ejemplo en /registro. El modo --produccion crea solo el
+plan de Enfermería (el plan de estudios OFICIAL se captura en la pantalla de
+materias de cada plan), el catálogo de conceptos de cobro y la configuración neutra
+de recargos; NO llama a db.create_all() (el esquema lo crea `flask db upgrade`).
+Es idempotente: lo que ya existe se omite.
 """
+
+import sys
 
 from app import app, db, PlanEstudio, Materia, ConceptoCobro, ConfiguracionCobros, TipoRecargo
 
@@ -112,11 +117,16 @@ PLANES_DEMO = [
 ]
 
 
-def sembrar():
+def sembrar(produccion=False):
     with app.app_context():
-        db.create_all()
+        if not produccion:
+            db.create_all()
+            planes = PLANES_DEMO
+        else:
+            # Solo el primer plan (Enfermería, LEN) y sin las materias de ejemplo.
+            planes = [{**PLANES_DEMO[0], 'materias': {}}]
 
-        for datos_plan in PLANES_DEMO:
+        for datos_plan in planes:
             existente = PlanEstudio.query.filter_by(
                 clave_carrera=datos_plan['clave_carrera'],
                 anio_generacion=datos_plan['anio_generacion']
@@ -162,7 +172,9 @@ def sembrar():
         ]
         for nombre in CONCEPTOS_DEMO:
             if not ConceptoCobro.query.filter_by(nombre=nombre).first():
-                db.session.add(ConceptoCobro(nombre=nombre, activo=True))
+                # "Colegiatura" ES la mensualidad: sin este marcador la generación automática
+                # de mensualidades (alta de alumnos, avance de cuatrimestre, lote) no hace nada.
+                db.session.add(ConceptoCobro(nombre=nombre, activo=True, es_mensualidad=(nombre == 'Colegiatura')))
         db.session.commit()
         print(f'Catálogo de conceptos de cobro listo ({len(CONCEPTOS_DEMO)} conceptos).')
 
@@ -174,7 +186,17 @@ def sembrar():
             'Ajústala en /configuracion/cobros.'
         )
 
+        if produccion:
+            print(
+                '\nSiguientes pasos (todo desde la pantalla, como Directivo):\n'
+                '  1. /planes/mensualidades  -> precio de la mensualidad de la carrera\n'
+                '  2. /conceptos-cobro       -> precio de Inscripción y Reinscripción\n'
+                '  3. /configuracion/cobros  -> política de recargos\n'
+                '  4. /planes/<id>/materias  -> materias del plan de estudios oficial\n'
+                '  5. /configuracion/institucion -> nombre de la institución'
+            )
+
 
 if __name__ == '__main__':
-    sembrar()
+    sembrar(produccion='--produccion' in sys.argv)
 
