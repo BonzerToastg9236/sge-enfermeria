@@ -31,6 +31,14 @@ document.querySelectorAll('.js-confirm-eliminar-materia').forEach((form) => {
   });
 });
 
+document.querySelectorAll('.js-confirm-cancelar-cargo').forEach((form) => {
+  form.addEventListener('submit', (evento) => {
+    const d = form.dataset;
+    const msg = `¿Cancelar el cargo '${d.concepto}'? Esta acción no se puede deshacer.`;
+    if (!confirm(msg)) evento.preventDefault();
+  });
+});
+
 // A diferencia de los de arriba, este NO usa data-*: el valor a
 // confirmar es lo que el operador ACABA de escribir en su propio
 // formulario (periodo_escolar), no un dato ya guardado de otro usuario

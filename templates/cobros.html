@@ -329,8 +329,8 @@
                                     {% endif %}
 
                                     {% if current_user.puede_gestionar_cargos() and cargo.estatus.name != 'CANCELADO' %}
-                                        <form action="{{ url_for('cobros.cancelar_cargo', cargo_id=cargo.id) }}" method="POST" class="mt-2"
-                                              onsubmit="return confirm('¿Cancelar el cargo \'{{ cargo.concepto }}\'? Esta acción no se puede deshacer.');">
+                                        <form action="{{ url_for('cobros.cancelar_cargo', cargo_id=cargo.id) }}" method="POST" class="mt-2 js-confirm-cancelar-cargo"
+                                              data-concepto="{{ cargo.concepto }}">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <input type="text" name="comentario" class="form-control form-control-sm mb-1"
                                                    placeholder="Motivo de la cancelación (obligatorio)" required minlength="5" maxlength="255">
@@ -355,6 +355,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script src="{{ url_for('static', filename='js/confirmaciones.js') }}"></script>
     <script>
         // Precios de referencia por concepto, para autocompletar el campo
         // "Monto" al elegir uno -- sigue siendo editable a mano después.
