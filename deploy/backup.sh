@@ -1,199 +1,114 @@
 #!/bin/bash
+# =============================================================================
+# Respaldo del SGE: base de datos (pg_dump) + documentos de alumnos (tar).
+#
+#   ./backup.sh            respaldo COMPLETO (base + documentos)        -> cron diario, 3:00
+#   ./backup.sh --solo-bd  solo la base (rápido; reduce cuánto se pierde) -> cron 12:00 y 18:00
+#
+# Qué garantiza:
+#   * cada archivo se VALIDA (gzip íntegro y dump COMPLETO: no basta con que exista);
+#   * los archivos se crean con permiso 600 (contienen datos personales);
+#   * la copia EXTERNA (rclone) va CIFRADA con GPG AES-256; sin frase de contraseña NO se sube nada;
+#   * si algo falla se deja un archivo ALERTA_ULTIMO_FALLO.txt y se manda correo (ver avisar.py);
+#   * rotación por días y por espacio, sin borrar nunca el respaldo recién hecho.
+# Variables de entorno opcionales: ver lib_respaldo.sh.
+# =============================================================================
 set -euo pipefail
+umask 077
 
-# ============================================================
-# Backup script - Sistema de Gestión Escolar (SGE)
-#
-# Respalda:
-#   1. La base de datos PostgreSQL completa (pg_dump)
-#   2. Los documentos digitalizados subidos (instance/documentos_alumnos/)
-#
-# Guarda los respaldos localmente en el VPS, y si rclone está
-# configurado (ver BACKUPS.md), también los copia a almacenamiento
-# externo — esto es lo que te protege si el VPS completo falla o
-# se pierde, no solo si se corrompe la base de datos.
-#
-# Diseñado para correr solo, todos los días, vía cron.
-#
-# ------------------------------------------------------------
-# CAMBIOS DE LA AUDITORÍA (no revertir sin leer esto):
-#
-# [D2] AUTENTICACIÓN EN CRON. pg_dump con "-h localhost" abre una
-#      conexión TCP, y PostgreSQL entonces pide CONTRASEÑA (scram/md5),
-#      no autenticación "peer" del sistema. Cuando corres el script a
-#      mano, tú la escribes y no se nota el problema; pero cron NO tiene
-#      terminal, así que ahí el respaldo fallaba TODAS las noches en
-#      silencio. La solución es ~/.pgpass (ver comprobación abajo y las
-#      instrucciones en BACKUPS.md).
-#
-# [D3] --clean --if-exists. Sin esto, el .sql generado NO contiene
-#      instrucciones DROP, así que al restaurarlo sobre una base que ya
-#      tiene tablas, todo falla con "ya existe" y la restauración queda
-#      a medias. Es decir: el respaldo existía, pero NO era recuperable.
-#
-# [D10] RETENCIÓN POR ESPACIO, no solo por días. 14 copias completas de
-#      documentos escaneados pueden llenar el disco del VPS; si el disco
-#      se llena, se cae PostgreSQL Y dejan de correr los respaldos, todo
-#      al mismo tiempo.
-#
-# También se agregó verificación de integridad: un respaldo que no se
-# puede descomprimir no sirve de nada, y es mejor enterarse ahora que
-# el día de la emergencia.
-# ============================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib_respaldo.sh
+source "$SCRIPT_DIR/lib_respaldo.sh"
 
-# --- Configuración: AJUSTA estos valores a tu servidor real ---
-APP_DIR="/home/sge/sge_enfermeria"
-BACKUP_DIR="/home/sge/backups"
-RETENTION_DIAS=14          # Cuántos días de respaldos LOCALES conservar
-RETENTION_MAX_MB=8000      # Tope duro de espacio para la carpeta de respaldos (8 GB)
-DB_NAME="sge_produccion"
-DB_USER="sge_user"
+RETENTION_DIAS="${RETENTION_DIAS:-14}"              # días de respaldos LOCALES
+RETENTION_MAX_MB="${RETENTION_MAX_MB:-8000}"        # tope duro de espacio local (8 GB)
+RETENTION_EXTERNO_DIAS="${RETENTION_EXTERNO_DIAS:-60}"
+RCLONE_DESTINO="${RCLONE_DESTINO:-backup:sge-backups/}"
+SOLO_BD=0; [ "${1:-}" = "--solo-bd" ] && SOLO_BD=1
 
-# [D2] Ruta explícita al archivo de contraseñas. cron arranca con un
-# entorno mínimo; no des por hecho que $HOME apunta a donde crees.
-export PGPASSFILE="/home/sge/.pgpass"
+trap 'alertar "El respaldo FALLÓ" "Falló el comando de la línea $LINENO de backup.sh. Revisa $LOG_FILE."' ERR
 
 FECHA=$(date +%Y-%m-%d_%H-%M-%S)
-LOG_FILE="$BACKUP_DIR/backup.log"
+log "--- Iniciando backup ($([ "$SOLO_BD" = 1 ] && echo solo base de datos || echo completo)) ---"
+exigir_pgpass
+pg_conexion
 
-mkdir -p "$BACKUP_DIR"
-
-log() {
-    echo "[$(date +%Y-%m-%d_%H-%M-%S)] $*" >> "$LOG_FILE"
-}
-
-log "--- Iniciando backup ---"
-
-# --- 0. Comprobación previa: ¿puede autenticarse este script? [D2] ---
-# Falla AQUÍ, con un mensaje claro, en vez de fallar a media noche sin
-# que nadie sepa por qué.
-if [ ! -f "$PGPASSFILE" ]; then
-    log "ERROR CRÍTICO: no existe $PGPASSFILE."
-    log "  Sin ese archivo, pg_dump no puede autenticarse cuando el script"
-    log "  corre desde cron (no hay terminal donde escribir la contraseña)."
-    log "  Créalo así (una sola vez, como usuario sge):"
-    log "    echo 'localhost:5432:$DB_NAME:$DB_USER:TU_PASSWORD' > ~/.pgpass"
-    log "    chmod 600 ~/.pgpass"
-    exit 1
-fi
-
-# PostgreSQL IGNORA el archivo .pgpass si tiene permisos demasiado
-# abiertos (es una protección suya, no un capricho). Si pasa eso, el
-# respaldo fallaría igual que si no existiera.
-PERMISOS_PGPASS=$(stat -c '%a' "$PGPASSFILE")
-if [ "$PERMISOS_PGPASS" != "600" ]; then
-    log "ERROR CRÍTICO: $PGPASSFILE tiene permisos $PERMISOS_PGPASS (deben ser 600)."
-    log "  PostgreSQL ignora el archivo si es legible por otros usuarios."
-    log "  Corrígelo con: chmod 600 $PGPASSFILE"
-    exit 1
-fi
-
-# --- 1. Dump de la base de datos, comprimido ---
+# ---------------------------------------------------------------- 1. Base de datos
 DB_BACKUP_FILE="$BACKUP_DIR/db_${FECHA}.sql.gz"
-
-# [D3] --clean --if-exists hace que el dump incluya los DROP necesarios,
-# para que restaurarlo sobre una base existente funcione de verdad.
-if pg_dump --clean --if-exists -U "$DB_USER" -h localhost "$DB_NAME" | gzip > "$DB_BACKUP_FILE"; then
-    TAMANO=$(du -h "$DB_BACKUP_FILE" | cut -f1)
-    log "OK: Base de datos respaldada ($TAMANO) -> $DB_BACKUP_FILE"
+# --no-owner/--no-privileges: el dump se puede restaurar en un servidor nuevo con otro usuario de BD.
+if pg_dump --clean --if-exists --no-owner --no-privileges "${PG_OPTS[@]}" "$DB_NAME" | gzip > "$DB_BACKUP_FILE"; then
+    :
 else
-    log "ERROR: Falló el respaldo de la base de datos. Abortando."
-    rm -f "$DB_BACKUP_FILE"   # no dejar un archivo a medias que parezca válido
-    exit 1
-fi
-
-# Verificar que el archivo se pueda descomprimir de verdad.
-if ! gzip -t "$DB_BACKUP_FILE" 2>>"$LOG_FILE"; then
-    log "ERROR: El respaldo de base de datos quedó CORRUPTO (gzip -t falló). Se elimina."
     rm -f "$DB_BACKUP_FILE"
+    alertar "Falló pg_dump" "No se pudo respaldar la base $DB_NAME."
     exit 1
 fi
-
-# Un dump válido de este proyecto nunca es diminuto. Si lo es, algo salió
-# mal aunque pg_dump haya devuelto éxito (ej. base vacía por error).
-TAMANO_BYTES=$(stat -c '%s' "$DB_BACKUP_FILE")
-if [ "$TAMANO_BYTES" -lt 1024 ]; then
-    log "AVISO: el respaldo pesa solo $TAMANO_BYTES bytes -- revisa que la base"
-    log "  de datos realmente tenga información."
+# Íntegro Y completo: pg_dump termina siempre con esta línea; si falta, el dump se cortó a la mitad.
+if ! gzip -t "$DB_BACKUP_FILE" 2>>"$LOG_FILE" || ! gunzip -c "$DB_BACKUP_FILE" | tail -n 5 | grep -q "PostgreSQL database dump complete"; then
+    rm -f "$DB_BACKUP_FILE"
+    alertar "Respaldo de la base corrupto o incompleto" "Se eliminó $DB_BACKUP_FILE (gzip inválido o dump cortado)."
+    exit 1
 fi
+log "OK: Base de datos respaldada ($(du -h "$DB_BACKUP_FILE" | cut -f1)) -> $DB_BACKUP_FILE"
+date -Iseconds > "$BACKUP_DIR/ULTIMO_RESPALDO_BD_OK"
 
-# --- 2. Comprimir la carpeta de documentos subidos ---
-# SECURITY-NOTE: esta ruta cambió de static/uploads/ a instance/documentos_alumnos/
-# porque los documentos de alumnos (INE, CURP, actas) ya NO viven dentro de
-# static/ -- static/ se sirve públicamente sin login (tanto por Flask como por
-# el alias /static/ de Nginx), así que había que sacarlos de ahí.
-UPLOADS_BACKUP_FILE="$BACKUP_DIR/documentos_${FECHA}.tar.gz"
-
-if [ -d "$APP_DIR/instance/documentos_alumnos" ]; then
-    if tar -czf "$UPLOADS_BACKUP_FILE" -C "$APP_DIR/instance" documentos_alumnos; then
-        TAMANO=$(du -h "$UPLOADS_BACKUP_FILE" | cut -f1)
-        log "OK: Documentos respaldados ($TAMANO) -> $UPLOADS_BACKUP_FILE"
+# ---------------------------------------------------------------- 2. Documentos
+UPLOADS_BACKUP_FILE=""
+if [ "$SOLO_BD" = 0 ]; then
+    if [ -d "$APP_DIR/instance/documentos_alumnos" ]; then
+        UPLOADS_BACKUP_FILE="$BACKUP_DIR/documentos_${FECHA}.tar.gz"
+        if ! tar -czf "$UPLOADS_BACKUP_FILE" -C "$APP_DIR/instance" documentos_alumnos; then
+            rm -f "$UPLOADS_BACKUP_FILE"
+            alertar "Falló el respaldo de documentos" "tar no pudo empaquetar instance/documentos_alumnos."
+            exit 1
+        fi
+        if ! tar -tzf "$UPLOADS_BACKUP_FILE" > /dev/null 2>>"$LOG_FILE"; then
+            rm -f "$UPLOADS_BACKUP_FILE"
+            alertar "Respaldo de documentos corrupto" "Se eliminó $UPLOADS_BACKUP_FILE."
+            exit 1
+        fi
+        log "OK: Documentos respaldados ($(du -h "$UPLOADS_BACKUP_FILE" | cut -f1)) -> $UPLOADS_BACKUP_FILE"
+        date -Iseconds > "$BACKUP_DIR/ULTIMO_RESPALDO_DOCS_OK"
     else
-        log "ERROR: Falló el respaldo de documentos."
-        rm -f "$UPLOADS_BACKUP_FILE"
-        exit 1
+        log "AVISO: aún no existe carpeta de documentos, se omite ese respaldo."
     fi
+fi
 
-    # Verificar que el .tar.gz se pueda leer completo. Esto es justo lo
-    # que restore.sh comprueba antes de tocar nada -- mejor detectarlo
-    # aquí, el día que se creó, que el día que se necesita.
-    if ! tar -tzf "$UPLOADS_BACKUP_FILE" > /dev/null 2>>"$LOG_FILE"; then
-        log "ERROR: El respaldo de documentos quedó CORRUPTO. Se elimina."
-        rm -f "$UPLOADS_BACKUP_FILE"
+# ---------------------------------------------------------------- 3. Copia EXTERNA (cifrada)
+if rclone_configurado; then
+    if [ -s "$BACKUP_PASSPHRASE_FILE" ]; then
+        for original in "$DB_BACKUP_FILE" ${UPLOADS_BACKUP_FILE:+"$UPLOADS_BACKUP_FILE"}; do
+            cifrado="${original}.gpg"
+            gpg --batch --yes --quiet --symmetric --cipher-algo AES256 --passphrase-file "$BACKUP_PASSPHRASE_FILE" -o "$cifrado" "$original"
+            rclone copy "$cifrado" "$RCLONE_DESTINO" >> "$LOG_FILE" 2>&1
+            rm -f "$cifrado"
+        done
+        log "OK: Copia externa CIFRADA subida a $RCLONE_DESTINO"
+        rclone delete "$RCLONE_DESTINO" --min-age "${RETENTION_EXTERNO_DIAS}d" >> "$LOG_FILE" 2>&1 || true
+        date -Iseconds > "$BACKUP_DIR/ULTIMA_COPIA_EXTERNA_OK"
+    else
+        alertar "Copia externa NO subida" "Hay rclone configurado pero falta la frase de contraseña ($BACKUP_PASSPHRASE_FILE). Por seguridad no se sube nada sin cifrar."
         exit 1
     fi
 else
-    log "AVISO: aún no existe carpeta de documentos, se omite este respaldo."
-    UPLOADS_BACKUP_FILE=""
+    log "AVISO IMPORTANTE: rclone no está configurado. Este respaldo SOLO está en este equipo:"
+    log "  si el disco falla o hay robo/incendio, se pierde junto con la base. Ver BACKUPS.md."
 fi
 
-# --- 3. Copia OFFSITE (fuera del VPS) con rclone, si está configurado ---
-# Ver BACKUPS.md para configurar el remoto llamado "backup" la primera vez.
-if command -v rclone >/dev/null 2>&1 && rclone listremotes 2>/dev/null | grep -q "^backup:"; then
-    rclone copy "$DB_BACKUP_FILE" backup:sge-backups/ >> "$LOG_FILE" 2>&1
-    if [ -n "$UPLOADS_BACKUP_FILE" ]; then
-        rclone copy "$UPLOADS_BACKUP_FILE" backup:sge-backups/ >> "$LOG_FILE" 2>&1
-    fi
-    log "OK: Copiado a almacenamiento externo (rclone)."
-else
-    log "AVISO IMPORTANTE: rclone no está configurado todavía."
-    log "  Este backup SOLO quedó en el propio VPS -> si el disco"
-    log "  falla, este respaldo se pierde también. Configura el"
-    log "  remoto 'backup' siguiendo BACKUPS.md cuanto antes."
-fi
-
-# --- 4. Rotación por ANTIGÜEDAD: borrar respaldos más viejos que N días ---
-# (los respaldos remotos, si usas rclone, no se borran aquí — configura su
-#  propia política de retención del lado del proveedor si lo necesitas)
-find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +$RETENTION_DIAS -delete
-find "$BACKUP_DIR" -name "documentos_*.tar.gz" -mtime +$RETENTION_DIAS -delete
-
-# --- 5. Rotación por ESPACIO [D10] ---
-# La rotación por días sola no basta: si los documentos escaneados crecen,
-# 14 días de respaldos pueden llenar el disco. Un disco lleno tumba
-# PostgreSQL y los respaldos al mismo tiempo -- el peor momento posible.
-# Aquí borramos del más viejo al más nuevo hasta volver bajo el tope,
-# NUNCA el que acabamos de crear.
+# ---------------------------------------------------------------- 4. Rotación local
+find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +"$RETENTION_DIAS" -delete
+find "$BACKUP_DIR" -name "documentos_*.tar.gz" -mtime +"$RETENTION_DIAS" -delete
 while true; do
     USADO_MB=$(du -sm "$BACKUP_DIR" | cut -f1)
-    if [ "$USADO_MB" -le "$RETENTION_MAX_MB" ]; then
-        break
-    fi
-
+    [ "$USADO_MB" -le "$RETENTION_MAX_MB" ] && break
     MAS_VIEJO=$(ls -1tr "$BACKUP_DIR"/db_*.sql.gz "$BACKUP_DIR"/documentos_*.tar.gz 2>/dev/null | head -1 || true)
-
-    # Sin nada más que borrar, o si lo único que queda es el respaldo de
-    # hoy: detenerse. Preferimos pasarnos del tope antes que quedarnos
-    # sin ningún respaldo.
     if [ -z "$MAS_VIEJO" ] || [ "$MAS_VIEJO" = "$DB_BACKUP_FILE" ] || [ "$MAS_VIEJO" = "$UPLOADS_BACKUP_FILE" ]; then
-        log "AVISO: la carpeta usa ${USADO_MB}MB (tope ${RETENTION_MAX_MB}MB), pero ya"
-        log "  no hay respaldos antiguos que borrar. Amplía el disco o baja"
-        log "  RETENTION_DIAS."
+        log "AVISO: la carpeta usa ${USADO_MB}MB (tope ${RETENTION_MAX_MB}MB) y ya no hay respaldos viejos que borrar. Amplía el disco."
         break
     fi
-
     rm -f "$MAS_VIEJO"
     log "Rotación por espacio: eliminado $MAS_VIEJO (uso ${USADO_MB}MB > ${RETENTION_MAX_MB}MB)"
 done
 
+trap - ERR
 log "--- Backup completado ---"

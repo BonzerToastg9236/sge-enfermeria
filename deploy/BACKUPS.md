@@ -1,155 +1,105 @@
-# Respaldos Automáticos — Sistema de Gestión Escolar (SGE)
+# Respaldos — Sistema de Gestión Escolar (SGE)
 
-## Por qué esto es obligatorio antes de cargar alumnos reales
+> Probado el 2026-09-20 con PostgreSQL 16: respaldo → **se destruyeron la base y los documentos** →
+> restauración desde la copia externa CIFRADA → 7 huellas idénticas (alumnos, cargos, pagos con sus folios,
+> bitácora, clave del administrador, versión del esquema y documentos byte a byte).
 
-Ahora mismo, si el disco del VPS falla, se llena, o borras algo por error,
-**se pierde todo**: la base de datos completa y cada documento escaneado
-que Control Escolar haya subido (actas, INEs, comprobantes). No hay forma
-de recuperarlo. Con documentación física que ya es difícil de conseguir de
-nuevo (como mencionaste), esto no es un "nice to have" — es la diferencia
-entre un inconveniente y una catástrofe real para la escuela.
+## Qué se protege y de qué
 
-## Requisito previo: autenticación de PostgreSQL
+| Si pasa esto… | ¿Se pierde algo? |
+|---|---|
+| Se borra algo por error / un dato se corrompe | Como máximo lo capturado desde el último respaldo de la base (**≤ ~9 h**; ver horarios) |
+| Falla el disco del servidor | Igual, **si hay copia externa** (sin ella, se pierde todo) |
+| Robo, incendio, inundación de la casa | Igual, **si la copia externa está fuera de casa** |
+| Ransomware / borrado malicioso | Las copias externas cifradas fuera del servidor sobreviven |
+| Se olvida la frase de cifrado **y** el servidor murió | **Las copias externas no se pueden abrir.** Guarda la frase fuera del servidor (ver abajo) |
 
-Antes de que este script pueda correr solo desde cron, PostgreSQL
-necesita poder autenticarte sin pedir contraseña por terminal. Este paso
-ya está cubierto en `DEPLOYMENT.md`, sección 12 (`~/.pgpass`) — si aún
-no lo hiciste, hazlo primero o el cron fallará todas las noches en
-silencio.
+Lo que queda **sin** proteger: lo capturado entre dos respaldos de la base y los documentos subidos desde
+el último respaldo completo (hasta ~24 h). Reducirlo a segundos exige archivado continuo de PostgreSQL (WAL/PITR),
+que es un paso posterior y más complejo.
 
-## Qué se respalda y cómo
+## Qué hace cada script (`deploy/`)
 
-`deploy/backup.sh` hace 2 cosas cada vez que corre:
+| Script | Qué hace |
+|---|---|
+| `backup.sh` | `pg_dump` de la base + `tar` de `instance/documentos_alumnos/`. **Valida** cada archivo (gzip íntegro y dump *completo*, no basta con que exista), permisos `600`, y sube una copia **cifrada** (GPG AES-256) con `rclone`. `--solo-bd` respalda solo la base (rápido). |
+| `verificar_respaldo.sh` | **Diario (`--frescura`)**: ¿hay respaldo reciente, íntegro y con copia externa al día? **Semanal**: además **restaura de verdad** el último dump en una base temporal y compara tablas con producción. |
+| `restore.sh` | Restaura base + documentos, desde un respaldo local **o desde la copia externa cifrada** (`.gpg`) en un servidor nuevo. Antes de sobrescribir guarda copia de lo actual. |
+| `avisar.py` | Manda correo si algo falla (y siempre deja `ALERTA_ULTIMO_FALLO.txt` en la carpeta de respaldos). |
 
-1. **`pg_dump --clean --if-exists`** de toda la base de datos PostgreSQL,
-   comprimido con gzip. Las banderas `--clean --if-exists` hacen que el
-   dump incluya las instrucciones para borrar cada tabla antes de
-   recrearla — esto es lo que permite que `restore.sh` pueda restaurar
-   limpio sobre una base que ya tiene datos, en vez de que la
-   restauración choque con "la tabla ya existe" a medio proceso.
-2. **`tar`** de toda la carpeta `instance/documentos_alumnos/` (los documentos subidos -- esta carpeta vive fuera de `static/` a propósito, porque `static/` se sirve públicamente sin login).
+## Instalación (una sola vez, como el usuario `sge`)
 
-Ambos se guardan con fecha y hora en el nombre, así que cada corrida deja
-un respaldo nuevo sin borrar los anteriores (hasta que la rotación los
-limpia — ver abajo).
+1. **Autenticación de PostgreSQL** para cron: `~/.pgpass` con permiso `600` (`DEPLOYMENT.md`, sección 12).
+2. **Permiso para la verificación semanal** (crea una base temporal, no toca datos):
+   `sudo -u postgres psql -c "ALTER USER sge_user CREATEDB;"`
+3. **Frase de cifrado** de la copia externa:
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.sge_backup_passphrase
+   chmod 600 ~/.sge_backup_passphrase
+   cat ~/.sge_backup_passphrase          # <- cópiala AHORA fuera del servidor
+   ```
+   **Guarda esa frase en un gestor de contraseñas o impresa en un sobre, FUERA del servidor.** Si el servidor
+   se pierde y la frase solo estaba ahí, las copias externas son ilegibles para siempre.
+4. **Copia externa** con `rclone` (elige Backblaze B2, Google Drive, etc.):
+   ```bash
+   sudo apt install -y rclone gnupg
+   rclone config        # ponle EXACTAMENTE el nombre "backup" al remoto
+   rclone lsd backup:   # sin error = conectado
+   ```
+   Si hay `rclone` pero falta la frase, **no se sube nada** (nunca se sube sin cifrar) y te llega el aviso.
+   Sin `rclone` los respaldos quedan solo en este equipo: el sistema lo advierte cada vez.
+5. **Avisos por correo** (opcional pero recomendado): en el `.env` de la app agrega
+   `ALERTA_CORREO=tu-correo@ejemplo.com` (usa el mismo `MAIL_USERNAME`/`MAIL_PASSWORD` del sistema).
+6. **Prueba manual** antes de automatizar:
+   ```bash
+   cd ~/sge_enfermeria && chmod +x deploy/*.sh
+   ./deploy/backup.sh && ./deploy/verificar_respaldo.sh && tail -20 ~/backups/backup.log
+   ```
 
-## El paso que la mayoría se salta (y no debes saltarte tú): respaldo OFFSITE
-
-Un respaldo guardado en el mismo VPS que respalda **no te protege de que
-el VPS entero falle, se hackee, o el proveedor tenga un problema** — el
-respaldo se va con él. Por eso el script también intenta copiar cada
-respaldo a un almacenamiento **externo** usando `rclone` (una herramienta
-gratuita que sincroniza con Google Drive, Backblaze B2, Amazon S3, y
-muchos más proveedores, con el mismo comando sin importar cuál elijas).
-
-### Configurar rclone (una sola vez)
-
-```bash
-sudo apt install -y rclone
-rclone config
-```
-
-`rclone config` es interactivo — te va a preguntar qué proveedor quieres
-usar. Cualquiera de estos funciona bien para este caso (poco espacio, se
-sube una vez al día):
-
-- **Backblaze B2** — pensado justo para respaldos, normalmente el más
-  barato para este uso. Revisa su tarifa vigente en su sitio antes de
-  decidir, cambia de vez en cuando.
-- **Google Drive** — si ya tienen una cuenta de Google Workspace de la
-  universidad, puede ser la opción más simple de armar.
-- **Amazon S3** — más conocido, un poco más caro para uso tan pequeño.
-
-Sea cual sea el que elijas, **cuando `rclone config` te pida un nombre
-para el "remote", ponle exactamente `backup`** — el script `backup.sh` ya
-está escrito esperando ese nombre. Al terminar, prueba que funcione:
-
-```bash
-rclone lsd backup:
-```
-
-Si no da error, ya quedó conectado.
-
-## Instalación en el VPS
-
-```bash
-cd ~/sge_enfermeria
-chmod +x deploy/backup.sh deploy/restore.sh
-```
-
-Corre uno manual para probar que sí funciona antes de automatizarlo:
-
-```bash
-./deploy/backup.sh
-cat ~/backups/backup.log
-```
-
-Si ves líneas de "OK" y no "ERROR", vas bien. Revisa también que se hayan
-creado los archivos:
-
-```bash
-ls -lh ~/backups/
-```
-
-## Automatizarlo con cron (que corra solo, todos los días)
-
-```bash
-crontab -e
-```
-
-Agrega esta línea al final del archivo (corre todos los días a las 3:00 AM,
-hora de menor uso):
+## Automatización (cron del usuario `sge`: `crontab -e`)
 
 ```
-0 3 * * * /home/sge/sge_enfermeria/deploy/backup.sh
+# Respaldo completo (base + documentos + copia externa cifrada) cada noche
+0 3 * * *    /home/sge/sge_enfermeria/deploy/backup.sh
+# Solo la base a mediodía y por la tarde: el máximo que se puede perder queda en ~9 horas
+0 12,18 * * * /home/sge/sge_enfermeria/deploy/backup.sh --solo-bd
+# Cada mañana: ¿corrió el respaldo? (avisa si no)
+0 8 * * *    /home/sge/sge_enfermeria/deploy/verificar_respaldo.sh --frescura
+# Cada domingo: restauración de PRUEBA en una base temporal
+0 4 * * 0    /home/sge/sge_enfermeria/deploy/verificar_respaldo.sh
 ```
 
-Guarda y cierra. Verifica que quedó agendado:
+## Servidor en casa: lo que el software no puede hacer por ti
 
-```bash
-crontab -l
-```
+- **Un solo disco es un solo punto de falla.** Lo ideal es un **segundo disco en espejo (RAID 1)**; como mínimo,
+  un **disco USB externo** donde se copie `~/backups` cada noche, además de la copia en la nube.
+- **No-break (UPS)** para el servidor y el módem; un apagón en plena escritura puede corromper la base.
+- Al instalar PostgreSQL conviene activar las sumas de verificación de datos (`initdb --data-checksums`);
+  detectan corrupción silenciosa del disco.
+- Revisa `~/backups/ALERTA_ULTIMO_FALLO.txt`: si existe, algo falló.
 
-De aquí en adelante, no tienes que hacer nada más — cada mañana vas a
-tener un respaldo nuevo, local y (si configuraste rclone) también externo.
+## Restaurar
 
-## Cómo saber si algo falló
-
-Revisa el log de vez en cuando (una vez a la semana es razonable):
-
-```bash
-tail -50 ~/backups/backup.log
-```
-
-Si quieres que te avisen automáticamente por correo cuando algo falla, es
-un paso extra que podemos agregar después (`msmtp` + que cron mande el
-resultado por correo) — dímelo si te interesa.
-
-## Cómo restaurar un respaldo
-
+**Caso normal** (misma máquina, con respaldos locales):
 ```bash
 cd ~/sge_enfermeria
-chmod +x deploy/restore.sh   # si no lo hiciste ya
-
-./deploy/restore.sh ~/backups/db_2026-07-15_03-00-00.sql.gz ~/backups/documentos_2026-07-15_03-00-00.tar.gz
+./deploy/restore.sh ~/backups/db_FECHA.sql.gz ~/backups/documentos_FECHA.tar.gz
 ```
 
-Te va a pedir confirmación explícita (escribir "si") antes de sobreescribir
-nada, precisamente porque es una operación destructiva sobre lo que esté
-en producción en ese momento.
+**Desastre** (servidor nuevo, todo perdido; solo tienes la copia externa y tu frase):
+1. Instala el sistema en el servidor nuevo siguiendo `DEPLOYMENT.md` **hasta el paso 5** (PostgreSQL, código, `.env`).
+   No hace falta correr `seed.py` ni `crear_admin.py`: todo viene en el respaldo.
+2. Baja de la nube el `db_*.sql.gz.gpg` y el `documentos_*.tar.gz.gpg` más recientes (`rclone copy backup:sge-backups/ ~/bajados/`).
+3. Escribe tu frase en `~/.sge_backup_passphrase` (`chmod 600`).
+4. `./deploy/restore.sh ~/bajados/db_FECHA.sql.gz.gpg ~/bajados/documentos_FECHA.tar.gz.gpg`
+5. Entra al sistema y verifica alumnos, cobros y un documento.
 
-El script valida que el archivo de documentos no esté corrupto **antes**
-de tocar nada — si el `.tar.gz` viene dañado, se detiene sin borrar tus
-documentos actuales. Y si todo sale bien, tu carpeta anterior de
-documentos no se borra de inmediato: queda renombrada como
-`documentos_alumnos.bak` por si necesitas compararla, y puedes borrarla
-tú mismo una vez que confirmes que todo se ve bien.
+`restore.sh` valida todo **antes** de tocar nada, guarda una copia de lo que hubiera (`antes_de_restaurar_*.sql.gz`),
+restaura con parada ante el primer error, corre `flask db upgrade` y deja los documentos anteriores renombrados
+hasta que confirmes que todo está bien.
 
-## Prueba tu restauración de vez en cuando — en serio
+## Rutina
 
-Un respaldo que nunca has probado a restaurar **no es un respaldo
-confiable**, es una suposición. Te recomiendo, cada 2-3 meses, correr
-`restore.sh` en un VPS de prueba (no en producción) para confirmar que el
-proceso completo de verdad funciona y que los datos quedan íntegros. Es
-más común de lo que parece descubrir, ya en una emergencia real, que el
-respaldo estaba corrupto o incompleto — mejor descubrirlo con calma antes.
+- **Cada semana**: mira que exista un correo de "verificación OK" o revisa `tail ~/backups/backup.log`.
+- **Cada 3 meses**: haz una restauración de prueba **en otra máquina** siguiendo el caso "Desastre". Es lo único
+  que prueba también tu frase y tu copia externa.
