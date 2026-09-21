@@ -21,6 +21,7 @@ from utilidades.seguridad import rol_requerido
 from utilidades.fechas import periodo_escolar_actual
 from utilidades.archivos import valor_seguro_excel, error_de_tamano_xlsx, error_de_dimensiones_hoja
 from utilidades.dinero import parsear_calificacion, MontoInvalido
+from servicios.terminologia import terminos
 from servicios.academico import _max_periodos, _registrar_historial_calificacion, _siguiente_numero_acta
 
 academico_bp = Blueprint('academico', __name__)
@@ -112,7 +113,7 @@ def boleta(matricula):
             guardadas += 1
 
         db.session.commit()
-        flash(f'Se guardaron {guardadas} calificación(es) del {cuatrimestre_seleccionado}° cuatrimestre.', 'success')
+        flash(f'Se guardaron {guardadas} calificación(es) de {cuatrimestre_seleccionado}° {terminos().periodo_l}.', 'success')
         return redirect(url_for('academico.boleta', matricula=matricula, cuatrimestre=cuatrimestre_seleccionado))
 
     # Precargar calificaciones existentes de las materias de este cuatrimestre
@@ -166,7 +167,7 @@ def plantilla_boletas():
 
     plan = db.get_or_404(PlanEstudio, plan_id) if plan_id else None
     if not plan or not cuatrimestre:
-        flash('Selecciona carrera y cuatrimestre antes de descargar la plantilla.', 'danger')
+        flash(f'Selecciona {terminos().programa_l} y {terminos().periodo_l} antes de descargar la plantilla.', 'danger')
         return redirect(url_for('academico.boletas_importar'))
 
     materias = (
@@ -176,7 +177,7 @@ def plantilla_boletas():
         .all()
     )
     if not materias:
-        flash(f'"{plan.nombre}" no tiene materias registradas para el {cuatrimestre}° cuatrimestre.', 'danger')
+        flash(f'"{plan.nombre}" no tiene materias registradas en {cuatrimestre}° {terminos().periodo_l}.', 'danger')
         return redirect(url_for('academico.boletas_importar'))
 
     alumnos = (
@@ -208,8 +209,8 @@ def plantilla_boletas():
     ws.freeze_panes = 'C2'
 
     ws_guia = wb.create_sheet('Guía')
-    ws_guia.append(['Carrera', plan.nombre])
-    ws_guia.append(['Cuatrimestre', cuatrimestre])
+    ws_guia.append([terminos().programa, plan.nombre])
+    ws_guia.append([terminos().periodo, cuatrimestre])
     ws_guia.append([])
     ws_guia.append(['Instrucciones'])
     ws_guia.append(['No cambies los encabezados ni la columna Matrícula.'])
@@ -246,7 +247,7 @@ def importar_boletas():
 
     plan = db.session.get(PlanEstudio, plan_id) if plan_id else None
     if not plan or not cuatrimestre:
-        flash('Selecciona carrera y cuatrimestre.', 'danger')
+        flash(f'Selecciona {terminos().programa_l} y {terminos().periodo_l}.', 'danger')
         return render_template('boletas_importar.html', planes=planes, max_cuatrimestres=_max_periodos(), periodo_escolar_sugerido=periodo_escolar_actual())
 
     if not periodo_escolar:
@@ -295,8 +296,8 @@ def importar_boletas():
     if encabezados[:2] != ['Matrícula', 'Nombre Completo'] or encabezados[2:] != nombres_materias_esperadas:
         flash(
             'Las columnas del archivo no coinciden con las materias de '
-            f'"{plan.nombre}" - {cuatrimestre}° cuatrimestre. Descarga la '
-            'plantilla de nuevo para esta carrera y cuatrimestre exactos '
+            f'"{plan.nombre}" - {cuatrimestre}° {terminos().periodo_l}. Descarga la '
+            f'plantilla de nuevo para esa combinación exacta de {terminos().programa_l} y {terminos().periodo_l} '
             '(puede que la hayas descargado para otra combinación).',
             'danger'
         )
@@ -317,7 +318,7 @@ def importar_boletas():
             errores.append({'fila': num_fila, 'matricula': matricula, 'nombre': nombre_mostrado, 'errores': ['Matrícula no encontrada.']})
             continue
         if alumno.id_plan_fk != plan.id:
-            errores.append({'fila': num_fila, 'matricula': matricula, 'nombre': alumno.nombre_completo, 'errores': ['Esta matrícula no pertenece a la carrera seleccionada.']})
+            errores.append({'fila': num_fila, 'matricula': matricula, 'nombre': alumno.nombre_completo, 'errores': [f'Esta matrícula no pertenece a {terminos().art} {terminos().programa_l} seleccionad{terminos().a_o}.']})
             continue
 
         fila_errores = []

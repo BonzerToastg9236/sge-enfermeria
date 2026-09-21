@@ -142,7 +142,7 @@
                 <div class="hoja">
                     <div class="membrete">
                         <div>
-                            <h5>Universidad de Enfermería</h5>
+                            <h5>{{ config_institucion.nombre_institucion }}</h5>
                             <small>Control Escolar &mdash; Sistema de Gestión Escolar</small>
                         </div>
                         <div class="foto-box">
@@ -291,7 +291,7 @@
 
                     {% if alumno.como_se_entero %}
                         <div class="dato mb-3">
-                            <span class="dato-label">¿Cómo se enteró de la universidad?</span>
+                            <span class="dato-label">¿Cómo se enteró de la institución?</span>
                             <div class="dato-valor">{{ alumno.como_se_entero }}</div>
                         </div>
                     {% endif %}
@@ -313,7 +313,7 @@
                 <div class="hoja salto-pagina">
                     <div class="membrete">
                         <div>
-                            <h5>Universidad de Enfermería</h5>
+                            <h5>{{ config_institucion.nombre_institucion }}</h5>
                             <small>Control Escolar &mdash; Reverso de la Ficha de Inscripción</small>
                         </div>
                     </div>

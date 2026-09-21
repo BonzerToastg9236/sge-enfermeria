@@ -33,6 +33,7 @@ from servicios.cobros import (
     normalizar_periodo_mensualidad, periodo_mensualidad_sugerido, monto_para_lote,
 )
 from servicios.auditoria import registrar
+from servicios.terminologia import terminos
 from servicios.correo import enviar_comprobante_pago, enviar_recordatorio_vencimiento, DIAS_AVISO_VENCIMIENTO
 
 cobros_bp = Blueprint('cobros', __name__)
@@ -107,7 +108,7 @@ def becas_alumno(matricula):
         elif not PERIODO_ESCOLAR_BECA_REGEX.match(periodo_escolar):
             errores.append(
                 'El periodo escolar debe ser un año ("2026", aplica a todo el año) '
-                'o año y cuatrimestre ("2026-B").'
+                f'o año y {terminos().periodo_l} ("2026-B").'
             )
 
         valor = None

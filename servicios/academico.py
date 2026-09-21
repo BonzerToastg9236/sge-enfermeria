@@ -11,6 +11,7 @@ from modelos import (
     HistorialCalificacion,
 )
 from servicios.cobros import _generar_cargos_de_reinscripcion
+from servicios.terminologia import terminos
 from utilidades.fechas import periodo_escolar_actual
 from utilidades.folios import siguiente_folio
 
@@ -82,7 +83,7 @@ def _avanzar_cuatrimestre(alumno):
         return False, f'{alumno.nombre_completo} no está Activo (está en "{alumno.estatus.value}"), no se puede avanzar.', [], [], []
 
     if alumno.cuatrimestre_actual >= max_cuatri:
-        return False, f'{alumno.nombre_completo} ya está en el último cuatrimestre configurado ({max_cuatri}°).', [], [], []
+        return False, f'{alumno.nombre_completo} ya está en {max_cuatri}° {terminos().periodo_l}, el máximo configurado.', [], [], []
 
     alumno.cuatrimestre_actual += 1
 
@@ -92,7 +93,7 @@ def _avanzar_cuatrimestre(alumno):
     # quedó incrementado arriba -- por eso genera la del cuatrimestre NUEVO.
     materias_generadas = _generar_carga_academica(alumno)
 
-    mensaje = f'{alumno.nombre_completo} avanzó al {alumno.cuatrimestre_actual}° cuatrimestre.'
+    mensaje = f'{alumno.nombre_completo} avanzó a {alumno.cuatrimestre_actual}° {terminos().periodo_l}.'
     return True, mensaje, cargos_generados, materias_generadas, avisos_de_configuracion
 
 

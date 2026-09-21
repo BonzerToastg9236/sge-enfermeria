@@ -291,6 +291,7 @@ configuración.
 - [ ] Respaldos automáticos configurados y probados — ver `deploy/BACKUPS.md`
 - [ ] Se hizo UNA restauración de prueba de un respaldo (ver `BACKUPS.md`), no solo el respaldo
 - [ ] Se sembró con `python seed.py --produccion` (en `/registro` solo aparece Enfermería)
+- [ ] Nombre de la institución configurado (`/configuracion/institucion`): sale en fichas, boletas, recibos, correos y reportes; mientras diga "Mi Institución Educativa" el sistema avisa al Directivo
 - [ ] Precios capturados: mensualidad de la carrera, Inscripción y Reinscripción, recargos
 - [ ] `redis-server` activo y habilitado (`systemctl enable redis-server`): guarda el límite de intentos de login
 - [ ] Reloj sincronizado: `timedatectl` debe decir `System clock synchronized: yes`

@@ -33,6 +33,7 @@ from utilidades.fechas import ahora_utc
 from utilidades.paginacion import ALUMNOS_POR_PAGINA, pagina_valida
 from servicios.alumnos import calcular_estadisticas_alumnos, _matriculas_con_adeudo
 from servicios.auditoria import registrar
+from servicios.terminologia import terminos
 from servicios.academico import _avanzar_cuatrimestre, _max_periodos, _generar_carga_academica
 from rutas.registro import CORREO_REGEX
 from servicios.matriculas import crear_alumno_generando_matricula, crear_alumno_con_matricula
@@ -157,7 +158,7 @@ COLUMNAS_IMPORTACION_ALUMNOS = [
     ('clave_carrera', True, 'Clave del plan de estudios (ver hoja "Guía" para las claves válidas)'),
     ('sexo', True, 'Femenino / Masculino / Otro'),
     ('estatus', False, 'PENDIENTE / ACTIVO / BAJA_TEMPORAL / BAJA_DEFINITIVA / EGRESADO (vacío = ACTIVO)'),
-    ('cuatrimestre_actual', False, 'Número de cuatrimestre en el que va (vacío = 1)'),
+    ('cuatrimestre_actual', False, 'Número de {periodo} actual (vacío = 1)'),
     ('correo', False, ''),
     ('telefono', False, 'Teléfono fijo'),
     ('telefono_movil', False, ''),
@@ -232,7 +233,7 @@ def plantilla_importacion():
         celda.font = Font(bold=True)
 
     for nombre_col, requerido, desc in COLUMNAS_IMPORTACION_ALUMNOS:
-        ws_guia.append([nombre_col, 'Sí' if requerido else 'No', desc])
+        ws_guia.append([nombre_col, 'Sí' if requerido else 'No', desc.replace('{periodo}', terminos().periodo_l)])
 
     ws_guia.column_dimensions['A'].width = 28
     ws_guia.column_dimensions['B'].width = 12
@@ -240,7 +241,7 @@ def plantilla_importacion():
 
     ws_guia.append([])
     fila_titulo_planes = ws_guia.max_row + 1
-    ws_guia.cell(row=fila_titulo_planes, column=1, value='Claves de carrera disponibles:').font = Font(bold=True)
+    ws_guia.cell(row=fila_titulo_planes, column=1, value=f'Claves de {terminos().programa_l} disponibles:').font = Font(bold=True)
 
     for plan in PlanEstudio.query.filter_by(activo=True).order_by(PlanEstudio.clave_carrera.asc()).all():
         ws_guia.append([plan.clave_carrera, plan.nombre])
@@ -711,7 +712,7 @@ def cambiar_estatus(matricula):
         )
     if materias_auto_inscritas:
         flash(
-            f'Se generó su carga académica del {alumno.cuatrimestre_actual}° cuatrimestre '
+            f'Se generó su carga académica de {alumno.cuatrimestre_actual}° {terminos().periodo_l} '
             f'({len(materias_auto_inscritas)} materia(s)). Puedes verla en Carga Académica.',
             'success'
         )
@@ -733,7 +734,7 @@ def avanzar_cuatrimestre(matricula):
         if cargos:
             registrar(
                 'CARGOS_AUTOMATICOS', 'Alumno', alumno.matricula_id,
-                f'{len(cargos)} cargo(s) generados al avanzar al {alumno.cuatrimestre_actual}° cuatrimestre',
+                f'{len(cargos)} cargo(s) generados al avanzar a {alumno.cuatrimestre_actual}° {terminos().periodo_l}',
                 matricula=alumno.matricula_id,
             )
         try:
@@ -743,7 +744,7 @@ def avanzar_cuatrimestre(matricula):
             # b7e2c9a41f3d.
             db.session.rollback()
             flash(
-                'No se pudo avanzar de cuatrimestre: ya se generó un cargo con la '
+                f'No se pudo avanzar de {terminos().periodo_l}: ya se generó un cargo con la '
                 'misma clave (alumno + concepto + periodo) justo ahora, '
                 'probablemente por otra operación al mismo tiempo. Vuelve a '
                 'intentarlo.',
@@ -754,7 +755,7 @@ def avanzar_cuatrimestre(matricula):
         if cargos:
             flash(f'Se generaron {len(cargos)} cargo(s) nuevo(s). Revísalos en Cobros.', 'success')
         if materias:
-            flash(f'Se generó su carga académica del {alumno.cuatrimestre_actual}° cuatrimestre ({len(materias)} materia(s)).', 'success')
+            flash(f'Se generó su carga académica de {alumno.cuatrimestre_actual}° {terminos().periodo_l} ({len(materias)} materia(s)).', 'success')
         for aviso in avisos_de_configuracion:
             flash(aviso, 'warning')
     else:
@@ -783,7 +784,7 @@ def avanzar_cuatrimestre_lote():
 
         plan = db.session.get(PlanEstudio, plan_id) if plan_id else None
         if not plan or not cuatrimestre_actual:
-            flash('Selecciona carrera y el cuatrimestre en el que están ahora.', 'danger')
+            flash(f'Selecciona {terminos().programa_l} y {terminos().periodo_l} en que están ahora.', 'danger')
             return render_template('avanzar_cuatrimestre.html', planes=planes, max_cuatrimestres=max_cuatri)
 
         alumnos = (
@@ -831,7 +832,7 @@ def avanzar_cuatrimestre_lote():
             # COMPLETO (nunca a medias) y se pide reintentar.
             db.session.rollback()
             flash(
-                'No se aplicó el avance de cuatrimestre: alguno de estos cargos '
+                f'No se aplicó el avance de {terminos().periodo_l}: alguno de estos cargos '
                 'ya se generó justo ahora por otra operación. Vuelve a '
                 'intentarlo -- los que ya estén al día se omitirán solos.',
                 'danger'
@@ -839,7 +840,7 @@ def avanzar_cuatrimestre_lote():
             return render_template('avanzar_cuatrimestre.html', planes=planes, max_cuatrimestres=max_cuatri)
 
         flash(
-            f'{len(avanzados)} alumno(s) avanzaron al {cuatrimestre_actual + 1}° cuatrimestre. '
+            f'{len(avanzados)} alumno(s) avanzaron a {cuatrimestre_actual + 1}° {terminos().periodo_l}. '
             f'{len(omitidos)} se omitieron (ver detalle abajo).',
             'success' if avanzados else 'warning'
         )

@@ -15,6 +15,7 @@ from sqlalchemy import func
 from extensiones import db
 from modelos import Alumno, Cargo, EstatusCargo, ConceptoCobro
 from modelos.cobros import calcular_recargo
+from servicios.terminologia import terminos
 from utilidades.fechas import hoy_local, periodo_escolar_actual
 
 MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -171,9 +172,9 @@ def _generar_cargos_de_periodo(alumno, nombre_concepto_unico):
     concepto_mensualidad = ConceptoCobro.query.filter_by(es_mensualidad=True, activo=True).first()
     if concepto_mensualidad and (not alumno.plan or alumno.plan.monto_mensualidad is None):
         avisos_de_configuracion.append(
-            f'No se generaron los cargos de mensualidad: la carrera '
+            f'No se generaron los cargos de mensualidad: {terminos().art} {terminos().programa_l} '
             f'"{alumno.plan.nombre if alumno.plan else "(sin plan)"}" todavía no tiene '
-            'mensualidad configurada. Captúrala en Mensualidades por Carrera.'
+            f'mensualidad configurada. Captúrala en {terminos().programas} y Mensualidades.'
         )
     elif concepto_mensualidad:
         for anio, mes in _meses_del_cuatrimestre_actual():

@@ -52,7 +52,7 @@
 
                 <div class="hoja shadow-lg">
                     <div class="membrete">
-                        <h5>Universidad de Enfermería</h5>
+                        <h5>{{ config_institucion.nombre_institucion }}</h5>
                         <small class="text-muted">Estado de Cuenta &mdash; Ciclo Escolar Completo</small>
                     </div>
 
@@ -66,7 +66,7 @@
                             <div class="fw-bold">{{ alumno.matricula_id }}</div>
                         </div>
                         <div class="col-md-3">
-                            <div class="small text-muted text-uppercase fw-bold" style="font-size:0.72rem;">Carrera</div>
+                            <div class="small text-muted text-uppercase fw-bold" style="font-size:0.72rem;">{{ config_institucion.nombre_programa_singular }}</div>
                             <div class="fw-bold">{{ alumno.plan.nombre if alumno.plan else '—' }}</div>
                         </div>
                     </div>

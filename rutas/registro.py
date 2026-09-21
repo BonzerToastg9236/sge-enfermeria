@@ -9,6 +9,7 @@ from markupsafe import Markup, escape
 from extensiones import db, limiter
 from modelos import Alumno, PlanEstudio, EstatusAlumno, TurnoAlumno, ModalidadEstudio
 from servicios.matriculas import crear_alumno_generando_matricula
+from servicios.terminologia import terminos
 from utilidades.validacion import errores_de_longitud
 
 registro_bp = Blueprint('registro', __name__)
@@ -121,7 +122,7 @@ def registro():
 
     plan = None
     if not id_plan_raw:
-        errores.append('Debes seleccionar tu carrera / plan de estudios.')
+        errores.append(f'Debes seleccionar tu {terminos().programa_l} / plan de estudios.')
     else:
         try:
             plan = db.session.get(PlanEstudio, int(id_plan_raw))

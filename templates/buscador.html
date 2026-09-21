@@ -144,6 +144,14 @@
         <!-- MENSAJES FLASH -->
         <div class="row justify-content-center mt-4">
             <div class="col-lg-8">
+                {% if institucion_sin_configurar and current_user.es_directivo() %}
+                <div class="alert alert-warning shadow-sm" role="alert">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    <strong>Configura el nombre de tu institución.</strong>
+                    Aparece en fichas de inscripción, boletas, recibos, estados de cuenta, correos y reportes; por ahora dice "{{ config_institucion.nombre_institucion }}".
+                    <a href="{{ url_for('configuracion.configuracion_institucion') }}" class="alert-link">Configurarlo ahora</a>.
+                </div>
+                {% endif %}
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}
                         {% for category, message in messages %}

@@ -307,7 +307,11 @@ def inyectar_configuracion_institucion():
     mismo código sirve para una universidad, una primaria, o cualquier
     otro nivel educativo, solo cambiando esta configuración.
     """
-    return {'config_institucion': ConfiguracionInstitucion.obtener()}
+    config = ConfiguracionInstitucion.obtener()
+    return {
+        'config_institucion': config,
+        'institucion_sin_configurar': config.nombre_institucion == ConfiguracionInstitucion.NOMBRE_POR_DEFECTO,
+    }
 
 
 # ---------------------------------------------------------------------------

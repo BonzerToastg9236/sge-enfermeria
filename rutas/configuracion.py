@@ -29,6 +29,7 @@ from servicios.auditoria import registrar
 from servicios.cobros import aplicar_mensualidad_a_pendientes, aplicar_precio_a_pendientes, recalcular_recargos_vencidos, impacto_de_politica
 from modelos.cobros import calcular_recargo
 from servicios.matriculas import formato_matricula_cabe, ejemplo_matricula
+from servicios.terminologia import terminos
 
 configuracion_bp = Blueprint('configuracion', __name__)
 
@@ -121,7 +122,7 @@ def _validar_carrera(form, plan_actual=None):
     if not errores:
         existente = PlanEstudio.query.filter_by(clave_carrera=clave, anio_generacion=anio).first()
         if existente and (plan_actual is None or existente.id != plan_actual.id):
-            errores.append(f'Ya existe una carrera con la clave {clave} y el año {anio}.')
+            errores.append(f'Ya existe {terminos().un} {terminos().programa_l} con la clave {clave} y el año {anio}.')
         elif not formato_matricula_cabe(ConfiguracionInstitucion.obtener(), clave):
             errores.append('Con el formato de matrícula configurado, esa clave haría matrículas de más de 20 caracteres. '
                            'Usa una clave más corta o ajusta el formato en Configuración de la Institución.')
@@ -147,9 +148,9 @@ def nuevo_plan():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        flash('Ya existe una carrera con esa clave y ese año.', 'danger')
+        flash(f'Ya existe {terminos().un} {terminos().programa_l} con esa clave y ese año.', 'danger')
         return redirect(url_for('configuracion.planes_mensualidades'))
-    flash(f'Carrera "{plan.nombre}" creada. Ahora agrega sus materias y define su mensualidad.', 'success')
+    flash(f'{terminos().programa} "{plan.nombre}" cread{terminos().a_o}. Ahora agrega sus materias y define su mensualidad.', 'success')
     return redirect(url_for('configuracion.planes_mensualidades'))
 
 
@@ -170,9 +171,9 @@ def editar_plan(plan_id):
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        flash('Ya existe una carrera con esa clave y ese año.', 'danger')
+        flash(f'Ya existe {terminos().un} {terminos().programa_l} con esa clave y ese año.', 'danger')
         return redirect(url_for('configuracion.planes_mensualidades'))
-    flash(f'Carrera "{plan.nombre}" actualizada. Los cambios ya se ven en todo el sistema; '
+    flash(f'{terminos().programa} "{plan.nombre}" actualizad{terminos().a_o}. Los cambios ya se ven en todo el sistema; '
           'las matrículas ya emitidas no cambian (solo las nuevas usarán la clave y año actuales).', 'success')
     return redirect(url_for('configuracion.planes_mensualidades'))
 
@@ -185,7 +186,7 @@ def toggle_plan(plan_id):
     plan.activo = not plan.activo
     registrar('PLAN_ACTIVADO' if plan.activo else 'PLAN_DESACTIVADO', 'PlanEstudio', plan.id, f'{plan.clave_carrera}-{plan.anio_generacion} {plan.nombre}')
     db.session.commit()
-    flash(f'Carrera "{plan.nombre}" {"activada" if plan.activo else "desactivada (ya no se ofrece a nuevos aspirantes; sus alumnos siguen igual)"}.', 'success')
+    flash(f'{terminos().programa} "{plan.nombre}" {"activad" if plan.activo else "desactivad"}{terminos().a_o}' + ('.' if plan.activo else ' (ya no se ofrece a nuevos aspirantes; sus alumnos siguen igual).'), 'success')
     return redirect(url_for('configuracion.planes_mensualidades'))
 
 
@@ -201,7 +202,7 @@ def eliminar_plan(plan_id):
     registrar('PLAN_ELIMINADO', 'PlanEstudio', plan.id, f'{plan.clave_carrera}-{plan.anio_generacion} {nombre} ({total_materias} materia(s) eliminadas con ella)')
     db.session.delete(plan)
     db.session.commit()
-    flash(f'Carrera "{nombre}" eliminada.', 'success')
+    flash(f'{terminos().programa} "{nombre}" eliminad{terminos().a_o}.', 'success')
     return redirect(url_for('configuracion.planes_mensualidades'))
 
 
@@ -226,7 +227,7 @@ def _validar_materia(form, plan_id, excluir_id=None):
     try:
         cuatrimestre = parsear_entero(form.get('cuatrimestre', ''), minimo=1, maximo=max_cuatri)
     except MontoInvalido:
-        errores.append(f'El cuatrimestre debe ser un número entre 1 y {max_cuatri}.')
+        errores.append(f'El número de {terminos().periodo_l} debe estar entre 1 y {max_cuatri}.')
     creditos = None
     creditos_raw = form.get('creditos', '').strip()
     if creditos_raw:
@@ -237,7 +238,7 @@ def _validar_materia(form, plan_id, excluir_id=None):
     if not errores:
         duplicada = Materia.query.filter_by(id_plan_fk=plan_id, nombre=nombre, cuatrimestre=cuatrimestre).first()
         if duplicada and duplicada.id != excluir_id:
-            errores.append(f'Ya existe "{nombre}" en el {cuatrimestre}° cuatrimestre de este plan.')
+            errores.append(f'Ya existe "{nombre}" en {cuatrimestre}° {terminos().periodo_l} de este plan.')
     return dict(nombre=nombre, clave=clave, cuatrimestre=cuatrimestre, creditos=creditos), errores
 
 
@@ -266,7 +267,7 @@ def gestionar_materias(plan_id):
             db.session.flush()
             registrar('MATERIA_CREADA', 'Materia', materia.id, f'{plan.clave_carrera}: {materia.nombre} ({materia.cuatrimestre}°)')
             db.session.commit()
-            flash(f'"{materia.nombre}" agregada al {materia.cuatrimestre}° cuatrimestre de {plan.nombre}.', 'success')
+            flash(f'"{materia.nombre}" agregada a {materia.cuatrimestre}° {terminos().periodo_l} de {plan.nombre}.', 'success')
 
         return redirect(url_for('configuracion.gestionar_materias', plan_id=plan.id))
 
@@ -502,6 +503,10 @@ def toggle_concepto_cobro(concepto_id):
     return redirect(url_for('configuracion.conceptos_cobro'))
 
 
+_CARACTERES_DE_CONTROL = re.compile(r'[\x00-\x1f\x7f]')
+_ROTULO = re.compile(r"[\w .'\-]+")          # letras (con acentos), números, espacio, punto, guion, apóstrofo
+
+
 @configuracion_bp.route('/configuracion/institucion', methods=['GET', 'POST'])
 @rol_requerido('DIRECTIVO')
 def configuracion_institucion():
@@ -512,32 +517,51 @@ def configuracion_institucion():
     / Grado Escolar...). Esto es lo que hace que el sistema sirva para
     cualquier tipo de escuela sin tocar código -- la estructura de datos
     de por sí ya es genérica, solo cambia cómo se le llama a cada cosa.
+    El nombre y la terminología se usan en TODAS las pantallas, documentos impresos,
+    correos y exportaciones (ver servicios/terminologia.py).
     """
     config = ConfiguracionInstitucion.obtener()
 
     if request.method == 'POST':
-        nombre_institucion = request.form.get('nombre_institucion', '').strip()
-        nombre_periodo_singular = request.form.get('nombre_periodo_singular', '').strip()
-        nombre_periodo_plural = request.form.get('nombre_periodo_plural', '').strip()
-        nombre_programa_singular = request.form.get('nombre_programa_singular', '').strip()
-        nombre_programa_plural = request.form.get('nombre_programa_plural', '').strip()
-        max_periodos_raw = request.form.get('max_periodos', '').strip()
-
         errores = []
-        if len(nombre_institucion) < 3:
-            errores.append('El nombre de la institución debe tener al menos 3 caracteres.')
-        if not nombre_periodo_singular or not nombre_periodo_plural:
-            errores.append('Indica cómo se llama cada periodo, en singular y en plural (ej. "Cuatrimestre" / "Cuatrimestres").')
-        if not nombre_programa_singular or not nombre_programa_plural:
-            errores.append('Indica cómo se llama el programa que agrupa los periodos, en singular y en plural (ej. "Carrera" / "Carreras").')
+
+        def leer(campo, etiqueta, minimo, maximo, patron=None):
+            crudo = request.form.get(campo, '')
+            if _CARACTERES_DE_CONTROL.search(crudo):
+                errores.append(f'{etiqueta}: no puede llevar saltos de línea ni caracteres de control.')
+                return None
+            limpio = re.sub(r'\s+', ' ', crudo).strip()          # espacios repetidos -> uno
+            if not minimo <= len(limpio) <= maximo:
+                errores.append(f'{etiqueta}: debe tener entre {minimo} y {maximo} caracteres.')
+                return None
+            if patron is not None and not patron.fullmatch(limpio):
+                errores.append(f'{etiqueta}: solo letras, números, espacios, punto, guion y apóstrofo.')
+                return None
+            return limpio
+
+        nombre_institucion = leer('nombre_institucion', 'Nombre de la institución', 3, 150)
+        periodo_s = leer('nombre_periodo_singular', 'Nombre del periodo (singular)', 1, 40, _ROTULO)
+        periodo_p = leer('nombre_periodo_plural', 'Nombre del periodo (plural)', 1, 40, _ROTULO)
+        programa_s = leer('nombre_programa_singular', 'Nombre del programa (singular)', 1, 40, _ROTULO)
+        programa_p = leer('nombre_programa_plural', 'Nombre del programa (plural)', 1, 40, _ROTULO)
+
+        genero = request.form.get('programa_genero')
+        if genero is not None and genero not in ('femenino', 'masculino'):
+            errores.append('Elige si el programa se dice en femenino (la carrera) o masculino (el programa).')
 
         max_periodos = None
         try:
-            max_periodos = int(max_periodos_raw)
-            if max_periodos < 1 or max_periodos > 30:
-                errores.append('El número máximo de periodos debe estar entre 1 y 30.')
-        except (ValueError, TypeError):
-            errores.append('Indica un número máximo de periodos válido.')
+            max_periodos = parsear_entero(request.form.get('max_periodos', ''), minimo=1, maximo=30)
+        except MontoInvalido:
+            errores.append('El número máximo de periodos debe ser un entero entre 1 y 30.')
+        if max_periodos is not None:
+            # Bajar el máximo por debajo de lo que ya se usa dejaría materias y alumnos "fuera de rango":
+            # desaparecerían de las pantallas (que recorren de 1 al máximo) sin poder verse ni editarse.
+            usado = max(db.session.query(func.max(Materia.cuatrimestre)).scalar() or 0,
+                        db.session.query(func.max(Alumno.cuatrimestre_actual)).scalar() or 0)
+            if max_periodos < usado:
+                errores.append(f'No puedes bajar el máximo a {max_periodos}: ya hay materias o alumnos en {usado}° {config.nombre_periodo_singular.lower()}. '
+                               'Muévelos o elimínalos primero.')
 
         # --- Formato de matrícula (solo se procesa si el formulario lo trae) ---
         formato = None
@@ -564,30 +588,44 @@ def configuracion_institucion():
                 # La matrícula más larga posible debe caber en 20 caracteres (Alumno.matricula_id).
                 clave_mas_larga = max((p.clave_carrera for p in PlanEstudio.query.all()), key=len, default='LEN')
                 if not formato_matricula_cabe(config, clave_mas_larga, **formato):
-                    errores.append(f'Con ese formato y la clave de carrera más larga ({clave_mas_larga}) las matrículas pasarían de 20 caracteres. Acórtalo.')
+                    errores.append(f'Con ese formato y la clave más larga ({clave_mas_larga}) las matrículas pasarían de 20 caracteres. Acórtalo.')
 
         if errores:
             for error in errores:
                 flash(error, 'danger')
-        else:
-            if formato is not None:
-                antes = ejemplo_matricula(config)
-                for campo, valor in formato.items():
-                    setattr(config, campo, valor)
+            return redirect(url_for('configuracion.configuracion_institucion'))
+
+        cambios = []
+        def cambiar(etiqueta, actual, nuevo):
+            if actual != nuevo:
+                cambios.append(f'{etiqueta}: "{actual}" -> "{nuevo}"')
+
+        cambiar('Institución', config.nombre_institucion, nombre_institucion)
+        cambiar('Periodo (singular)', config.nombre_periodo_singular, periodo_s)
+        cambiar('Periodo (plural)', config.nombre_periodo_plural, periodo_p)
+        cambiar('Programa (singular)', config.nombre_programa_singular, programa_s)
+        cambiar('Programa (plural)', config.nombre_programa_plural, programa_p)
+        cambiar('Máximo de periodos', config.max_periodos, max_periodos)
+        if genero is not None:
+            cambiar('Género del programa', 'femenino' if config.programa_es_femenino else 'masculino', genero)
+            config.programa_es_femenino = genero == 'femenino'
+        config.nombre_institucion, config.nombre_periodo_singular, config.nombre_periodo_plural = nombre_institucion, periodo_s, periodo_p
+        config.nombre_programa_singular, config.nombre_programa_plural, config.max_periodos = programa_s, programa_p, max_periodos
+
+        if formato is not None:
+            antes = ejemplo_matricula(config)
+            for campo, valor in formato.items():
+                setattr(config, campo, valor)
+            if ejemplo_matricula(config) != antes:
                 registrar('CONFIG_MATRICULA', 'ConfiguracionInstitucion', config.id,
                           f'Formato de matrícula: ejemplo {antes} -> {ejemplo_matricula(config)} '
                           f'(prefijo "{config.matricula_prefijo}", clave={config.matricula_incluye_clave}, '
                           f'año={config.matricula_incluye_anio}, separador "{config.matricula_separador}", dígitos {config.matricula_digitos}). '
                           'Solo aplica a matrículas nuevas.')
-            config.nombre_institucion = nombre_institucion
-            config.nombre_periodo_singular = nombre_periodo_singular
-            config.nombre_periodo_plural = nombre_periodo_plural
-            config.nombre_programa_singular = nombre_programa_singular
-            config.nombre_programa_plural = nombre_programa_plural
-            config.max_periodos = max_periodos
-            db.session.commit()
-            flash('Configuración de la institución actualizada.', 'success')
-
+        if cambios:
+            registrar('CONFIG_INSTITUCION', 'ConfiguracionInstitucion', config.id, '; '.join(cambios))
+        db.session.commit()
+        flash('Configuración de la institución actualizada. Los cambios ya se ven en fichas, boletas, recibos, correos y demás pantallas.', 'success')
         return redirect(url_for('configuracion.configuracion_institucion'))
 
     return render_template('configuracion_institucion.html', config=config, ejemplo_matricula=ejemplo_matricula(config))

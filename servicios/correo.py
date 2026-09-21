@@ -11,6 +11,18 @@ from flask import current_app
 from flask_mail import Message
 
 from extensiones import mail
+from servicios.terminologia import terminos
+
+
+def _remitente(nombre_institucion):
+    """
+    Nombre que ve el alumno como remitente: el de la institución (no "Control Escolar SGE" fijo). Si no hay
+    cuenta de correo configurada se usa el remitente por defecto de la app. El nombre ya viene sin saltos de
+    línea (la pantalla de configuración los rechaza); aquí se limpia de nuevo por si acaso.
+    """
+    usuario = current_app.config.get('MAIL_USERNAME')
+    limpio = ' '.join(nombre_institucion.split())
+    return (limpio, usuario) if usuario and limpio else None
 
 
 # SECURITY-NOTE: lo que se le dice al personal cuando falla un envío.
@@ -41,10 +53,13 @@ def enviar_comprobante_pago(alumno, cargo, pago):
         return False, 'El alumno no tiene correo registrado.'
 
     try:
+        institucion = terminos().institucion
         mensaje = Message(
             subject=f'Comprobante de Pago - Folio {pago.folio or ("#" + str(pago.id))}',
             recipients=[alumno.correo],
+            sender=_remitente(institucion),
             body=(
+                f'{institucion}\n\n'
                 f'Hola {alumno.nombre_completo},\n\n'
                 f'Se registró tu pago con los siguientes datos:\n\n'
                 f'Concepto: {cargo.concepto}\n'
@@ -52,7 +67,7 @@ def enviar_comprobante_pago(alumno, cargo, pago):
                 f'Fecha: {pago.fecha_pago.strftime("%d/%m/%Y %H:%M")}\n'
                 f'Folio: {pago.folio or ("#" + str(pago.id))}\n'
                 f'Saldo pendiente del cargo: ${cargo.saldo_pendiente()}\n\n'
-                f'Este es un correo automático del Sistema de Gestión Escolar.'
+                f'Este es un correo automático del Sistema de Gestión Escolar de {institucion}.'
             ),
         )
         mail.send(mensaje)
@@ -74,10 +89,13 @@ def enviar_recordatorio_vencimiento(alumno, cargo):
         return False, 'El alumno no tiene correo registrado.'
 
     try:
+        institucion = terminos().institucion
         mensaje = Message(
             subject=f'Recordatorio: {cargo.concepto} próximo a vencer',
             recipients=[alumno.correo],
+            sender=_remitente(institucion),
             body=(
+                f'{institucion}\n\n'
                 f'Hola {alumno.nombre_completo},\n\n'
                 f'Te recordamos que tienes un pago próximo a vencer:\n\n'
                 f'Concepto: {cargo.concepto}\n'
@@ -85,7 +103,7 @@ def enviar_recordatorio_vencimiento(alumno, cargo):
                 f'Saldo pendiente: ${cargo.saldo_pendiente()}\n'
                 f'Fecha límite: {cargo.fecha_vencimiento.strftime("%d/%m/%Y")}\n\n'
                 f'Después de esta fecha se aplica un recargo por atraso.\n\n'
-                f'Este es un correo automático del Sistema de Gestión Escolar.'
+                f'Este es un correo automático del Sistema de Gestión Escolar de {institucion}.'
             ),
         )
         mail.send(mensaje)

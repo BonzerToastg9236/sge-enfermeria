@@ -102,6 +102,15 @@
                             </div>
 
                             <div class="mb-4">
+                                <label class="form-label fw-bold" for="programaGenero">Género gramatical del programa</label>
+                                <select class="form-select" style="max-width: 320px;" name="programa_genero" id="programaGenero">
+                                    <option value="femenino" {{ 'selected' if config.programa_es_femenino }}>Femenino (la carrera, la licenciatura)</option>
+                                    <option value="masculino" {{ 'selected' if not config.programa_es_femenino }}>Masculino (el programa, el nivel educativo)</option>
+                                </select>
+                                <small class="text-muted d-block mt-1">Para que los mensajes concuerden: "esta carrera" / "este programa", "creada" / "creado".</small>
+                            </div>
+
+                            <div class="mb-4">
                                 <label class="form-label fw-bold">Número máximo de periodos</label>
                                 <input type="number" min="1" max="30" class="form-control" style="max-width: 160px;"
                                        name="max_periodos" value="{{ config.max_periodos }}" required>

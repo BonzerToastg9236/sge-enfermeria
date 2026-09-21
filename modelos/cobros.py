@@ -184,7 +184,8 @@ class ConfiguracionInstitucion(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    nombre_institucion = db.Column(db.String(150), nullable=False, default='Mi Institución Educativa')
+    NOMBRE_POR_DEFECTO = 'Mi Institución Educativa'   # mientras Dirección no ponga el suyo, se le avisa en la pantalla de inicio
+    nombre_institucion = db.Column(db.String(150), nullable=False, default=NOMBRE_POR_DEFECTO)
 
     # Cómo se le llama a cada periodo numerado (Cuatrimestre / Semestre / Grado / Año / Trimestre / Nivel...)
     nombre_periodo_singular = db.Column(db.String(40), nullable=False, default='Cuatrimestre')

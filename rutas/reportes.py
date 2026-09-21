@@ -11,6 +11,12 @@ from flask import Blueprint, render_template, request, flash, send_file
 from utilidades.seguridad import rol_requerido
 from utilidades.fechas import hoy_local, ahora_utc, a_local
 from utilidades.archivos import valor_seguro_excel
+from servicios.terminologia import terminos
+
+
+def _titulo(texto):
+    """Primera fila de cada Excel: nombre de la institución + título del reporte (sin fórmulas vivas)."""
+    return valor_seguro_excel(f'{terminos().institucion} — {texto}')
 from utilidades.paginacion import _paginar_lista, CARGOS_POR_PAGINA, pagina_valida
 from servicios.reportes import (
     _calcular_reporte_cobros_del_dia, _calcular_cartera_vencida,
@@ -65,7 +71,7 @@ def exportar_reporte_cobros_del_dia():
     fuente_encabezado = Font(bold=True, color='FFFFFF')
     relleno_encabezado = PatternFill(start_color='0D6EFD', end_color='0D6EFD', fill_type='solid')
 
-    ws.append([f'Reporte de Cobros del Día - {fecha_reporte.strftime("%d/%m/%Y")}'])
+    ws.append([_titulo(f'Reporte de Cobros del Día - {fecha_reporte.strftime("%d/%m/%Y")}')])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
     ws.append(['Folio', 'Hora', 'Alumno', 'Matrícula', 'Concepto', 'Método', 'Monto', 'Estatus'])
@@ -166,7 +172,7 @@ def exportar_cartera_vencida():
     fuente_encabezado = Font(bold=True, color='FFFFFF')
     relleno_encabezado = PatternFill(start_color='DC3545', end_color='DC3545', fill_type='solid')
 
-    ws.append([f'Cartera Vencida - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}'])
+    ws.append([_titulo(f'Cartera Vencida - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}')])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
     ws.append(['Alumno', 'Matrícula', 'Concepto', 'Periodo', 'Días de Atraso', 'Saldo Pendiente'])
@@ -224,7 +230,7 @@ def exportar_dashboard_cobros():
     fuente_encabezado = Font(bold=True, color='FFFFFF')
     relleno_encabezado = PatternFill(start_color='0D6EFD', end_color='0D6EFD', fill_type='solid')
 
-    ws.append([f'Dashboard de Cobros - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}'])
+    ws.append([_titulo(f'Dashboard de Cobros - Generado {a_local(ahora_utc()).strftime("%d/%m/%Y %H:%M")}')])
     ws['A1'].font = Font(bold=True, size=14)
     ws.append([])
     ws.append(['Total cobrado este mes', float(datos['total_cobrado_mes_actual'])])
