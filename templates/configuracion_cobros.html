@@ -33,7 +33,7 @@
 
     <div class="container">
         <div class="row justify-content-center">
-            <div class="col-lg-6">
+            <div class="col-lg-9 col-xl-8">
 
 
                 <div class="card card-config shadow-lg">
@@ -53,44 +53,84 @@
                         {% endwith %}
 
                         <p class="text-muted small">
-                            Este recargo se calcula automáticamente cada vez que se consulta el
-                            estado de un alumno con un cargo vencido — no necesitas hacer nada
-                            manualmente. Si cambias esta configuración, aplica de inmediato a los
-                            cargos que sigan vencidos a partir de ahora.
+                            El recargo se calcula automáticamente cada vez que se consulta un cargo vencido: no tienes que
+                            hacer nada manualmente. <strong>Los días de gracia no se cobran</strong>: solo cuentan los días
+                            después de la gracia.
                         </p>
 
-                        <form method="POST" action="{{ url_for('configuracion.configuracion_cobros') }}">
+                        <form method="POST" action="{{ url_for('configuracion.configuracion_cobros') }}" id="formRecargos"
+                              data-url-simular="{{ url_for('configuracion.simular_recargo') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Tipo de Recargo</label>
-                                <select class="form-select" name="tipo_recargo" id="tipoRecargo">
-                                    {% for tipo in tipos_recargo %}
-                                        <option value="{{ tipo.name }}" {% if tipo == config.tipo_recargo %}selected{% endif %}>
-                                            {{ tipo.value }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold" for="tipoRecargo">Tipo de recargo</label>
+                                    <select class="form-select" name="tipo_recargo" id="tipoRecargo">
+                                        {% for tipo in tipos_recargo %}
+                                            <option value="{{ tipo.name }}" {% if tipo == config.tipo_recargo %}selected{% endif %}>{{ tipo.value }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-6">
+                                    <label class="form-label fw-semibold" for="valorRecargo" id="labelValor">Valor</label>
+                                    <input type="number" step="0.01" min="0" class="form-control" name="valor_recargo" id="valorRecargo"
+                                           value="{{ config.valor_recargo }}" required>
+                                </div>
+                                <div class="col-md-3 col-6">
+                                    <label class="form-label fw-semibold" for="diasGracia">Días de gracia</label>
+                                    <input type="number" min="0" max="365" step="1" class="form-control" name="dias_gracia" id="diasGracia" value="{{ config.dias_gracia }}">
+                                </div>
+                                <div class="col-12"><small class="text-muted" id="ayudaValor"></small></div>
                             </div>
 
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold" id="labelValor">Valor</label>
-                                <input type="number" step="0.01" min="0" class="form-control" name="valor_recargo"
-                                       value="{{ config.valor_recargo }}" required>
-                                <small class="text-muted" id="ayudaValor"></small>
+                            <!-- SIMULADOR -->
+                            <div class="ejemplo-box mb-3" id="panelSimulador">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
+                                    <strong><i class="bi bi-calculator me-1"></i> Simulador (no guarda nada)</strong>
+                                    <span class="small">Cargo de ejemplo:
+                                        <div class="input-group input-group-sm d-inline-flex align-items-center" style="width: 9.5rem;">
+                                            <span class="input-group-text">$</span>
+                                            <input type="number" min="1" step="0.01" class="form-control" id="montoEjemplo" value="2500">
+                                        </div>
+                                    </span>
+                                </div>
+                                <table class="table table-sm mb-1 align-middle" id="tablaSimulador">
+                                    <thead><tr><th>Días de atraso</th><th class="text-end">Recargo</th><th class="text-end">Total a pagar</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                                <div class="small text-danger d-none" id="errorSimulador"></div>
                             </div>
 
-                            <div class="mb-4">
-                                <label class="form-label fw-semibold">Días de Gracia</label>
-                                <input type="number" min="0" class="form-control" name="dias_gracia" value="{{ config.dias_gracia }}">
-                                <small class="text-muted">
-                                    Días después del vencimiento antes de empezar a generar recargo (0 = aplica desde el día siguiente al vencimiento).
-                                </small>
+                            <!-- IMPACTO EN LOS CARGOS YA VENCIDOS -->
+                            <div class="ejemplo-box mb-3" id="panelImpacto">
+                                <strong><i class="bi bi-graph-up-arrow me-1"></i> Cargos vencidos hoy:</strong>
+                                <span id="impVencidos">{{ impacto.vencidos }}</span>
+                                <div class="small mt-1">
+                                    Con esta política: <strong id="impSuben">{{ impacto.suben }}</strong> subirían,
+                                    <strong id="impBajan">{{ impacto.bajan }}</strong> bajarían,
+                                    <strong id="impIguales">{{ impacto.iguales }}</strong> quedarían igual.
+                                    Recargos totales: <strong>$<span id="impActual">{{ impacto.total_actual }}</span></strong> hoy →
+                                    <strong>$<span id="impRecalculado">{{ impacto.total_recalculado }}</span></strong> si recalculas
+                                    (<span class="text-muted">$<span id="impSinRecalcular">{{ impacto.total_sin_recalcular }}</span> si solo guardas</span>).
+                                </div>
+                            </div>
+
+                            <div class="d-flex gap-2 align-items-start mb-3 p-3 border rounded-3 bg-light">
+                                <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" name="recalcular_vencidos" id="recalcularVencidos">
+                                <label class="form-check-label" for="recalcularVencidos">
+                                    <strong>Recalcular ahora los recargos de los cargos ya vencidos</strong> con esta política.
+                                    <span class="d-block small text-muted">
+                                        Si NO lo marcas, el recargo de un cargo vencido <strong>solo sube</strong>: los que hoy tienen un recargo mayor
+                                        se quedan como están (así no se borra un recargo que ya se comunicó al alumno). Si lo marcas, esos
+                                        también <strong>bajan</strong>. No afecta recargos condonados a mano, cargos pagados ni cancelados, y nunca
+                                        deja un saldo a favor. Queda registrado en la bitácora.
+                                    </span>
+                                </label>
                             </div>
 
                             <div class="ejemplo-box mb-4">
                                 <i class="bi bi-lightbulb me-1"></i>
-                                <strong>Configuración actual:</strong> {{ config.tipo_recargo.value }},
+                                <strong>Configuración vigente:</strong> {{ config.tipo_recargo.value }},
                                 valor ${{ config.valor_recargo }}, {{ config.dias_gracia }} día(s) de gracia.
                             </div>
 
@@ -107,20 +147,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-    <script>
-        const textos = {
-            'MONTO_FIJO': 'Monto en pesos que se cobra UNA sola vez al cargo vencido.',
-            'PORCENTAJE': 'Porcentaje (ej. 5 = 5%) que se aplica sobre el monto original del cargo.',
-            'POR_DIA': 'Monto en pesos que se multiplica por cada día de atraso (crece cada día).',
-        };
-        const select = document.getElementById('tipoRecargo');
-        const ayuda = document.getElementById('ayudaValor');
-
-        function actualizarAyuda() {
-            ayuda.textContent = textos[select.value] || '';
-        }
-        select.addEventListener('change', actualizarAyuda);
-        actualizarAyuda();
-    </script>
+    <script src="{{ url_for('static', filename='js/recargos.js') }}"></script>
 </body>
 </html>

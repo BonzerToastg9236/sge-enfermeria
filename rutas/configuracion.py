@@ -10,7 +10,7 @@ $0 automáticamente -- no alterar esa regla al mover estas rutas.
 import re
 from decimal import Decimal
 
-from flask import Blueprint, render_template, request, flash, redirect, url_for
+from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -26,7 +26,8 @@ from utilidades.dinero import (
 )
 from servicios.academico import _max_periodos
 from servicios.auditoria import registrar
-from servicios.cobros import aplicar_mensualidad_a_pendientes, aplicar_precio_a_pendientes
+from servicios.cobros import aplicar_mensualidad_a_pendientes, aplicar_precio_a_pendientes, recalcular_recargos_vencidos, impacto_de_politica
+from modelos.cobros import calcular_recargo
 from servicios.matriculas import formato_matricula_cabe, ejemplo_matricula
 
 configuracion_bp = Blueprint('configuracion', __name__)
@@ -592,61 +593,100 @@ def configuracion_institucion():
     return render_template('configuracion_institucion.html', config=config, ejemplo_matricula=ejemplo_matricula(config))
 
 
+def _validar_politica_recargo(tipo_raw, valor_raw, dias_gracia_raw):
+    """(tipo, valor, dias_gracia, errores) de una política de recargos. La usan guardar y simular."""
+    errores = []
+    tipo = TipoRecargo[tipo_raw] if tipo_raw in TipoRecargo.__members__ else None
+    if tipo is None:
+        errores.append('Selecciona un tipo de recargo válido.')
+
+    # Cada tipo de recargo tiene su propio tope: un porcentaje no pasa de 100 y un monto por día
+    # no puede ser de millones (un typo aquí se propaga a todos los cargos vencidos).
+    if tipo_raw in ('PORCENTAJE', 'PORCENTAJE_MENSUAL'):
+        tope = PORCENTAJE_MAXIMO
+    elif tipo_raw == 'POR_DIA':
+        tope = RECARGO_MAXIMO_POR_DIA
+    else:
+        tope = MONTO_MAXIMO
+    valor = None
+    try:
+        valor = parsear_monto((valor_raw or '').strip(), permitir_cero=True, maximo=tope)
+    except MontoInvalido as e:
+        errores.append(f'El valor del recargo no es válido. {e}')
+
+    dias_gracia = 0
+    try:
+        dias_gracia = parsear_entero((dias_gracia_raw or '0').strip() or '0', minimo=0, maximo=DIAS_GRACIA_MAXIMOS)
+    except MontoInvalido as e:
+        errores.append(f'Los días de gracia no son válidos. {e}')
+    return tipo, valor, dias_gracia, errores
+
+
+@configuracion_bp.route('/configuracion/cobros/simular')
+@rol_requerido('DIRECTIVO', 'CONTADOR')
+def simular_recargo():
+    """
+    Simulador: cuánto recargo daría una política (sin guardarla) sobre un cargo de ejemplo a distintos días
+    de atraso, y cómo afectaría HOY a los cargos ya vencidos. Usa la MISMA fórmula que el cálculo real.
+    """
+    tipo, valor, dias_gracia, errores = _validar_politica_recargo(
+        request.args.get('tipo_recargo', ''), request.args.get('valor_recargo', ''), request.args.get('dias_gracia', '0'))
+    monto = None
+    try:
+        monto = parsear_monto(request.args.get('monto', '2500') or '2500')
+    except MontoInvalido as e:
+        errores.append(f'El monto de ejemplo no es válido. {e}')
+    if errores:
+        return jsonify(error=' '.join(errores)), 400
+
+    ejemplos = []
+    for dias in (1, 3, 5, 10, 15, 30, 45, 60, 90):
+        recargo = calcular_recargo(monto, dias, tipo, valor, dias_gracia)
+        ejemplos.append(dict(dias=dias, recargo=str(recargo), total=str(monto + recargo)))
+    impacto = {k: (str(v) if isinstance(v, Decimal) else v) for k, v in impacto_de_politica(tipo, valor, dias_gracia).items()}
+    return jsonify(ejemplos=ejemplos, impacto=impacto, monto=str(monto))
+
+
 @configuracion_bp.route('/configuracion/cobros', methods=['GET', 'POST'])
 @rol_requerido('DIRECTIVO', 'CONTADOR')
 def configuracion_cobros():
     """
     Configuración de recargos por atraso — auto-ajustable: cada
     universidad define su propia fórmula aquí, sin tocar código.
+
+    El recargo de un cargo vencido solo SUBE por sí solo (así nunca se borra un recargo que ya se comunicó).
+    Para aplicar una política más baja a los cargos ya vencidos hay que pedirlo explícitamente
+    (casilla "recalcular"), y el sistema nunca deja un saldo a favor.
     """
     config = ConfiguracionCobros.obtener()
 
     if request.method == 'POST':
-        tipo_raw = request.form.get('tipo_recargo', '')
-        valor_raw = request.form.get('valor_recargo', '').strip()
-        dias_gracia_raw = request.form.get('dias_gracia', '0').strip()
-
-        errores = []
-
-        if tipo_raw not in TipoRecargo.__members__:
-            errores.append('Selecciona un tipo de recargo válido.')
-
-        # Cada tipo de recargo tiene su propio tope: un porcentaje no pasa de
-        # 100 y un monto por día no puede ser de millones (el recargo nunca
-        # baja solo, así que un typo aquí no se revierte).
-        if tipo_raw in ('PORCENTAJE', 'PORCENTAJE_MENSUAL'):
-            tope = PORCENTAJE_MAXIMO
-        elif tipo_raw == 'POR_DIA':
-            tope = RECARGO_MAXIMO_POR_DIA
-        else:
-            tope = MONTO_MAXIMO
-        valor = None
-        try:
-            valor = parsear_monto(valor_raw, permitir_cero=True, maximo=tope)
-        except MontoInvalido as e:
-            errores.append(f'El valor del recargo no es válido. {e}')
-
-        dias_gracia = 0
-        try:
-            dias_gracia = parsear_entero(dias_gracia_raw or '0', minimo=0, maximo=DIAS_GRACIA_MAXIMOS)
-        except MontoInvalido as e:
-            errores.append(f'Los días de gracia no son válidos. {e}')
+        tipo, valor, dias_gracia, errores = _validar_politica_recargo(
+            request.form.get('tipo_recargo', ''), request.form.get('valor_recargo', ''), request.form.get('dias_gracia', '0'))
 
         if errores:
             for error in errores:
                 flash(error, 'danger')
             return redirect(url_for('configuracion.configuracion_cobros'))
 
-        registrar(
-            'CONFIG_RECARGOS', 'ConfiguracionCobros', config.id,
-            f'{config.tipo_recargo.name} {config.valor_recargo} gracia {config.dias_gracia} -> {tipo_raw} {valor} gracia {dias_gracia}',
-        )
-        config.tipo_recargo = TipoRecargo[tipo_raw]
+        detalle = f'{config.tipo_recargo.name} {config.valor_recargo} gracia {config.dias_gracia} -> {tipo.name} {valor} gracia {dias_gracia}'
+        config.tipo_recargo = tipo
         config.valor_recargo = valor
         config.dias_gracia = dias_gracia
+
+        resumen = None
+        if request.form.get('recalcular_vencidos') == 'on':
+            resumen = recalcular_recargos_vencidos(config)
+            detalle += (f'; recalculados {resumen["cambiados"]} cargo(s) vencidos ({resumen["suben"]} suben, {resumen["bajan"]} bajan): '
+                        f'recargos ${resumen["total_antes"]} -> ${resumen["total_despues"]}')
+        registrar('CONFIG_RECARGOS', 'ConfiguracionCobros', config.id, detalle)
         db.session.commit()
 
         flash('Configuración de recargos actualizada correctamente.', 'success')
+        if resumen is not None:
+            flash(f'Se recalcularon {resumen["cambiados"]} cargo(s) ya vencidos: {resumen["suben"]} subieron y {resumen["bajan"]} bajaron '
+                  f'(recargos ${resumen["total_antes"]} → ${resumen["total_despues"]}).', 'info')
         return redirect(url_for('configuracion.configuracion_cobros'))
 
-    return render_template('configuracion_cobros.html', config=config, tipos_recargo=list(TipoRecargo))
+    return render_template('configuracion_cobros.html', config=config, tipos_recargo=list(TipoRecargo),
+                           impacto=impacto_de_politica(config.tipo_recargo, config.valor_recargo, config.dias_gracia))

@@ -32,7 +32,7 @@
 
     <div class="container">
         <div class="row justify-content-center">
-            <div class="col-lg-7">
+            <div class="col-xl-10">
 
 
                 <div class="card card-conceptos shadow-lg">
@@ -77,54 +77,51 @@
                         </form>
 
                         <div class="table-responsive">
-                            <table class="table table-striped align-middle">
+                            <table class="table table-striped align-middle tabla-conceptos">
                                 <thead>
-                                    <tr><th>Concepto</th><th>Precio sugerido</th><th>Estatus</th><th class="text-end">Acción</th></tr>
+                                    <tr><th style="min-width: 15rem;">Concepto</th><th style="min-width: 17rem;">Precio sugerido</th><th>Estatus</th><th class="text-end" style="min-width: 9.5rem;">Acciones</th></tr>
                                 </thead>
                                 <tbody>
                                     {% for concepto in conceptos %}
                                         <tr>
                                             <td>
-                                                {{ concepto.nombre }}
-                                                {% if concepto.es_mensualidad %}
-                                                    <span class="badge bg-info text-dark ms-1" title="Usa el precio por {{ config_institucion.nombre_programa_singular|lower }}">Mensualidad</span>
-                                                {% endif %}
+                                                <div class="fw-semibold">{{ concepto.nombre }}
+                                                    {% if concepto.es_mensualidad %}
+                                                        <span class="badge bg-info text-dark ms-1" title="Usa el precio por {{ config_institucion.nombre_programa_singular|lower }}">Mensualidad</span>
+                                                    {% endif %}
+                                                </div>
                                                 <details class="mt-1">
-                                                    <summary class="small text-primary" style="cursor:pointer"><i class="bi bi-pencil me-1"></i>Renombrar</summary>
-                                                    <form action="{{ url_for('configuracion.renombrar_concepto', concepto_id=concepto.id) }}" method="POST" class="d-flex gap-1 mt-1">
+                                                    <summary class="small text-primary" style="cursor:pointer"><i class="bi bi-pencil me-1"></i>Cambiar nombre</summary>
+                                                    <form action="{{ url_for('configuracion.renombrar_concepto', concepto_id=concepto.id) }}" method="POST" class="mt-2">
                                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                        <input type="text" class="form-control form-control-sm" name="nombre" value="{{ concepto.nombre }}" maxlength="100" required>
-                                                        <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+                                                        <label class="form-label small mb-1" for="nombre{{ concepto.id }}">Nuevo nombre</label>
+                                                        <input type="text" class="form-control" id="nombre{{ concepto.id }}" name="nombre" value="{{ concepto.nombre }}"
+                                                               maxlength="100" minlength="3" required style="min-width: 14rem;">
+                                                        <button type="submit" class="btn btn-sm btn-primary mt-2">Guardar nombre</button>
+                                                        <div class="small text-muted mt-1">Se actualiza también en los cargos que ya lo usan.</div>
                                                     </form>
-                                                    <div class="small text-muted">Se actualiza también en los cargos que ya lo usan.</div>
                                                 </details>
                                             </td>
                                             <td>
-                                                <form action="{{ url_for('configuracion.editar_precio_concepto', concepto_id=concepto.id) }}" method="POST" class="d-flex align-items-center gap-2">
+                                                <form action="{{ url_for('configuracion.editar_precio_concepto', concepto_id=concepto.id) }}" method="POST" class="js-precio-concepto">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                    <div class="input-group input-group-sm" style="max-width: 160px;">
+                                                    <div class="input-group" style="min-width: 12rem;">
                                                         <span class="input-group-text">$</span>
-                                                        <input type="number" step="0.01" min="0" class="form-control" name="monto_sugerido"
+                                                        <input type="number" step="0.01" min="0" max="99999999.99" class="form-control js-campo-precio" name="monto_sugerido"
                                                                value="{{ concepto.monto_sugerido if concepto.monto_sugerido is not none else '' }}"
-                                                               placeholder="—" {{ 'disabled' if concepto.es_mensualidad else '' }}>
+                                                               placeholder="Sin precio" aria-label="Precio de {{ concepto.nombre }}"
+                                                               data-placeholder-normal="Sin precio" data-placeholder-mensualidad="Según la {{ config_institucion.nombre_programa_singular|lower }}"
+                                                               {{ 'disabled' if concepto.es_mensualidad else '' }}>
                                                     </div>
-                                                    <div class="form-check form-check-inline mb-0">
-                                                        <input class="form-check-input" type="checkbox" name="es_mensualidad"
-                                                               id="esMensualidad{{ concepto.id }}" {{ 'checked' if concepto.es_mensualidad else '' }}
-                                                               onchange="this.form.querySelector('input[name=monto_sugerido]').disabled = this.checked;">
-                                                        <label class="form-check-label small" for="esMensualidad{{ concepto.id }}" title="Usar precio por {{ config_institucion.nombre_programa_singular|lower }} en vez del precio sugerido">
-                                                            <i class="bi bi-mortarboard"></i>
-                                                        </label>
+                                                    <div class="form-check mt-2">
+                                                        <input class="form-check-input js-es-mensualidad" type="checkbox" name="es_mensualidad" id="esMensualidad{{ concepto.id }}" {{ 'checked' if concepto.es_mensualidad else '' }}>
+                                                        <label class="form-check-label small" for="esMensualidad{{ concepto.id }}">Es la mensualidad (usa el precio de cada {{ config_institucion.nombre_programa_singular|lower }})</label>
                                                     </div>
-                                                    <button type="submit" class="btn btn-sm btn-outline-primary">
-                                                        <i class="bi bi-check-lg"></i>
-                                                    </button>
-                                                    {% if not concepto.es_mensualidad %}
-                                                        <div class="form-check mb-0">
-                                                            <input class="form-check-input" type="checkbox" name="aplicar_pendientes" id="apc{{ concepto.id }}">
-                                                            <label class="form-check-label small" for="apc{{ concepto.id }}" title="Solo cargos PENDIENTES sin pagos; lo ya cobrado no se toca">Aplicar a pendientes</label>
-                                                        </div>
-                                                    {% endif %}
+                                                    <div class="form-check js-fila-aplicar" {{ 'hidden' if concepto.es_mensualidad else '' }}>
+                                                        <input class="form-check-input" type="checkbox" name="aplicar_pendientes" id="apc{{ concepto.id }}">
+                                                        <label class="form-check-label small" for="apc{{ concepto.id }}" title="Solo cargos PENDIENTES sin pagos; lo ya cobrado no se toca">Aplicar también a cargos pendientes sin pagos</label>
+                                                    </div>
+                                                    <button type="submit" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-check-lg me-1"></i>Guardar precio</button>
                                                 </form>
                                             </td>
                                             <td>
@@ -135,16 +132,16 @@
                                                 {% endif %}
                                             </td>
                                             <td class="text-end">
-                                                <form action="{{ url_for('configuracion.toggle_concepto_cobro', concepto_id=concepto.id) }}" method="POST" class="d-inline">
+                                                <form action="{{ url_for('configuracion.toggle_concepto_cobro', concepto_id=concepto.id) }}" method="POST" class="d-grid mb-1">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                                     <button type="submit" class="btn btn-sm {{ 'btn-outline-danger' if concepto.activo else 'btn-outline-success' }}">
                                                         {% if concepto.activo %}Desactivar{% else %}Activar{% endif %}
                                                     </button>
                                                 </form>
-                                                <form action="{{ url_for('configuracion.eliminar_concepto', concepto_id=concepto.id) }}" method="POST" class="d-inline js-confirm"
+                                                <form action="{{ url_for('configuracion.eliminar_concepto', concepto_id=concepto.id) }}" method="POST" class="d-grid js-confirm"
                                                       data-mensaje="¿Eliminar el concepto '{{ concepto.nombre }}'? Solo se puede si nunca se cobró. Si ya tiene cargos, desactívalo.">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3"></i></button>
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3 me-1"></i>Eliminar</button>
                                                 </form>
                                             </td>
                                         </tr>

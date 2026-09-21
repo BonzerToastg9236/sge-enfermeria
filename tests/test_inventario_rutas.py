@@ -88,6 +88,7 @@ INVENTARIO_ESPERADO = [
     ('/conceptos-cobro/<int:concepto_id>/editar-precio', ('POST',), 'configuracion.editar_precio_concepto', ('DIRECTIVO', 'CONTADOR')),
     ('/conceptos-cobro/<int:concepto_id>/toggle', ('POST',), 'configuracion.toggle_concepto_cobro', ('DIRECTIVO', 'CONTADOR')),
     ('/configuracion/cobros', ('GET', 'POST'), 'configuracion.configuracion_cobros', ('DIRECTIVO', 'CONTADOR')),
+    ('/configuracion/cobros/simular', ('GET',), 'configuracion.simular_recargo', ('DIRECTIVO', 'CONTADOR')),
     ('/configuracion/institucion', ('GET', 'POST'), 'configuracion.configuracion_institucion', ('DIRECTIVO',)),
     ('/documento/<int:doc_id>/eliminar', ('POST',), 'documentos.eliminar_documento', ('DIRECTIVO',)),
     ('/login', ('GET', 'POST'), 'auth.login', None),

@@ -59,3 +59,21 @@ document.querySelectorAll('.js-confirm').forEach((form) => {
     if (!confirm(form.dataset.mensaje)) evento.preventDefault();
   });
 });
+
+// Catálogo de conceptos: el campo de precio se bloquea SOLO mientras "Es la mensualidad" está marcada.
+// Se reconcilia al cargar y al volver a la página (pageshow): el navegador puede restaurar la casilla
+// sin restaurar el estado "disabled" (o al revés), y el campo se quedaba bloqueado aunque se desmarcara.
+function sincronizarPrecioConcepto(form) {
+  const casilla = form.querySelector('.js-es-mensualidad');
+  const precio = form.querySelector('.js-campo-precio');
+  const fila = form.querySelector('.js-fila-aplicar');
+  if (!casilla || !precio) return;
+  precio.disabled = casilla.checked;
+  precio.placeholder = casilla.checked ? precio.dataset.placeholderMensualidad : precio.dataset.placeholderNormal;
+  if (fila) fila.hidden = casilla.checked;
+}
+document.querySelectorAll('.js-precio-concepto').forEach((form) => {
+  form.querySelector('.js-es-mensualidad').addEventListener('change', () => sincronizarPrecioConcepto(form));
+  sincronizarPrecioConcepto(form);
+});
+window.addEventListener('pageshow', () => document.querySelectorAll('.js-precio-concepto').forEach(sincronizarPrecioConcepto));

@@ -14,6 +14,7 @@ from sqlalchemy import func
 
 from extensiones import db
 from modelos import Alumno, Cargo, EstatusCargo, ConceptoCobro
+from modelos.cobros import calcular_recargo
 from utilidades.fechas import hoy_local, periodo_escolar_actual
 
 MESES_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -266,3 +267,75 @@ def aplicar_precio_a_pendientes(concepto, monto):
             cargo.actualizar_estatus()
             cambiados += 1
     return cambiados
+
+
+def _cargos_con_recargo_recalculable():
+    """Cargos abiertos con fecha de vencimiento cuyo recargo NO fue ajustado a mano (condonado)."""
+    return (
+        Cargo.query
+        .filter(Cargo.estatus.in_([EstatusCargo.PENDIENTE, EstatusCargo.PARCIAL]))
+        .filter(Cargo.fecha_vencimiento.isnot(None))
+        .filter(Cargo.recargo_congelado.is_(False))
+        .all()
+    )
+
+
+def _recargo_segun_politica(cargo, tipo, valor, gracia, hoy):
+    """
+    Recargo que tendría el cargo con la política dada, respetando un PISO: nunca menos de lo que ya se pagó por
+    encima del monto original (bajarlo más dejaría dinero cobrado sin cargo, saldo a favor).
+    """
+    nuevo = calcular_recargo(cargo.monto, (hoy - cargo.fecha_vencimiento).days, tipo, valor, gracia)
+    if nuevo < cargo.recargo_aplicado:
+        piso = max(Decimal('0.00'), cargo.total_pagado() - cargo.monto)
+        nuevo = max(nuevo, piso)
+    return nuevo
+
+
+def impacto_de_politica(tipo, valor, gracia):
+    """
+    Qué pasaría con los cargos abiertos HOY si se aplicara esta política, SIN cambiar nada:
+    cuántos suben, bajan o quedan igual, y el total de recargos actual / recalculado / sin recalcular
+    (esto último = lo que pasa si solo se guarda la política: el recargo únicamente sube).
+    """
+    hoy = hoy_local()
+    r = dict(vencidos=0, suben=0, bajan=0, iguales=0,
+             total_actual=Decimal('0.00'), total_recalculado=Decimal('0.00'), total_sin_recalcular=Decimal('0.00'))
+    for cargo in _cargos_con_recargo_recalculable():
+        if cargo.fecha_vencimiento >= hoy and cargo.recargo_aplicado == 0:
+            continue  # aún no vence y no tiene recargo: no le afecta
+        nuevo = _recargo_segun_politica(cargo, tipo, valor, gracia, hoy)
+        actual = cargo.recargo_aplicado
+        r['vencidos'] += 1
+        r['total_actual'] += actual
+        r['total_recalculado'] += nuevo
+        r['total_sin_recalcular'] += max(actual, nuevo)
+        if nuevo > actual:
+            r['suben'] += 1
+        elif nuevo < actual:
+            r['bajan'] += 1
+        else:
+            r['iguales'] += 1
+    return r
+
+
+def recalcular_recargos_vencidos(config):
+    """
+    Aplica la política vigente (config) a los cargos abiertos YA vencidos: los que tenían de más BAJAN y los que
+    quedaron cortos SUBEN. No toca recargos condonados a mano, ni cargos pagados/cancelados, ni deja saldo a favor.
+    Quien llama hace el commit. Devuelve el resumen del cambio.
+    """
+    hoy = hoy_local()
+    r = dict(cambiados=0, suben=0, bajan=0, total_antes=Decimal('0.00'), total_despues=Decimal('0.00'))
+    for cargo in _cargos_con_recargo_recalculable():
+        antes = cargo.recargo_aplicado
+        nuevo = _recargo_segun_politica(cargo, config.tipo_recargo, config.valor_recargo, config.dias_gracia, hoy)
+        if nuevo == antes:
+            continue
+        cargo.recargo_aplicado = nuevo
+        cargo.actualizar_estatus()
+        r['cambiados'] += 1
+        r['suben' if nuevo > antes else 'bajan'] += 1
+        r['total_antes'] += antes
+        r['total_despues'] += nuevo
+    return r

@@ -41,7 +41,7 @@ class MetodoPago(enum.Enum):
 class TipoRecargo(enum.Enum):
     """Cada universidad calcula sus recargos distinto — por eso es configurable."""
     MONTO_FIJO = 'Monto fijo (una sola vez)'
-    PORCENTAJE = 'Porcentaje del adeudo'
+    PORCENTAJE = 'Porcentaje del monto del cargo'
     POR_DIA = 'Monto fijo por cada día de atraso'
     PORCENTAJE_MENSUAL = 'Porcentaje acumulativo por cada mes de atraso'
 
@@ -235,6 +235,34 @@ class ConfiguracionInstitucion(db.Model):
         return 'otra' if self.programa_es_femenino else 'otro'
 
 
+def calcular_recargo(monto, dias_de_atraso, tipo, valor, dias_gracia):
+    """
+    Recargo que corresponde a un cargo de `monto` con `dias_de_atraso` días de atraso, según la política
+    (tipo, valor, dias_gracia). Función PURA: la usan el cálculo automático, el recálculo de cargos ya
+    vencidos y el simulador de la pantalla de configuración, así que los tres dan siempre lo mismo.
+    Los días de gracia no se cobran: solo cuentan los días DESPUÉS de la gracia.
+    """
+    dias = dias_de_atraso - dias_gracia
+    if dias <= 0:
+        return Decimal('0.00')  # todavía dentro del periodo de gracia
+
+    if tipo == TipoRecargo.MONTO_FIJO:
+        recargo = valor
+    elif tipo == TipoRecargo.PORCENTAJE:
+        recargo = (monto * valor / Decimal('100')).quantize(Decimal('0.01'))
+    elif tipo == TipoRecargo.POR_DIA:
+        recargo = (valor * dias).quantize(Decimal('0.01'))
+    elif tipo == TipoRecargo.PORCENTAJE_MENSUAL:
+        # Ej.: mensualidad $2,000, valor=10 -> $200 por cada mes COMPLETO de atraso (mes 1: $200, mes 2: $400...).
+        # "Mes" = bloque de 30 días de atraso (redondeo hacia arriba, mínimo 1).
+        meses = -(-dias // 30)
+        recargo = (monto * valor / Decimal('100') * meses).quantize(Decimal('0.01'))
+    else:
+        recargo = Decimal('0.00')
+
+    return min(recargo, MONTO_MAXIMO)  # nunca más de lo que cabe en Numeric(10,2)
+
+
 class Cargo(db.Model):
     """
     Un cobro pendiente para un alumno (colegiatura de un mes, inscripción,
@@ -343,29 +371,10 @@ class Cargo(db.Model):
         if config is None:
             config = ConfiguracionCobros.obtener()
         hoy = hoy_local()
-        dias_de_atraso = (hoy - self.fecha_vencimiento).days - config.dias_gracia
-
-        if dias_de_atraso <= 0:
-            return  # todavía dentro del periodo de gracia: no se aplica ningún recargo
-
-        if config.tipo_recargo == TipoRecargo.MONTO_FIJO:
-            recargo_calculado = config.valor_recargo
-        elif config.tipo_recargo == TipoRecargo.PORCENTAJE:
-            recargo_calculado = (self.monto * config.valor_recargo / Decimal('100')).quantize(Decimal('0.01'))
-        elif config.tipo_recargo == TipoRecargo.POR_DIA:
-            recargo_calculado = (config.valor_recargo * dias_de_atraso).quantize(Decimal('0.01'))
-        elif config.tipo_recargo == TipoRecargo.PORCENTAJE_MENSUAL:
-            # Ej.: mensualidad $2,000, valor_recargo=10 -> se suman $200 por
-            # cada mes COMPLETO de atraso (mes 1: $200, mes 2: $400, etc.).
-            # Aproximamos "mes" como bloques de 30 días de atraso.
-            meses_de_atraso = -(-dias_de_atraso // 30)  # redondeo hacia arriba, mínimo 1
-            recargo_calculado = (
-                self.monto * config.valor_recargo / Decimal('100') * meses_de_atraso
-            ).quantize(Decimal('0.01'))
-        else:
-            recargo_calculado = Decimal('0.00')
-
-        recargo_calculado = min(recargo_calculado, MONTO_MAXIMO)  # nunca más de lo que cabe en Numeric(10,2)
+        recargo_calculado = calcular_recargo(
+            self.monto, (hoy - self.fecha_vencimiento).days,
+            config.tipo_recargo, config.valor_recargo, config.dias_gracia,
+        )
 
         if recargo_calculado > self.recargo_aplicado:
             self.recargo_aplicado = recargo_calculado
